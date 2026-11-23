@@ -158,6 +158,56 @@ fun ScorexApp(preferences: SharedPreferences) {
     }
 }
 
+private fun formatOffsetLabel(offset: Int): String = when (offset) {
+    0 -> "Ma (0)"
+    -1 -> "Tegnap (-1)"
+    1 -> "Holnap (+1)"
+    else -> if (offset > 0) "+$offset nap" else "$offset nap"
+}
+
+private fun evaluateTipStatus(
+    tip: String,
+    matches: List<ScorexMatch>
+): Pair<String, Color> {
+    val colonIdx = tip.lastIndexOf(": ")
+    if (colonIdx <= 0) return "Mentve" to SecondaryColor
+
+    val teamsPart = tip.substring(0, colonIdx)
+    val pickPart = tip.substring(colonIdx + 2).trim()
+    val dashIdx = teamsPart.indexOf(" – ")
+    if (dashIdx <= 0) return "Mentve" to SecondaryColor
+
+    val home = teamsPart.substring(0, dashIdx).trim()
+    val away = teamsPart.substring(dashIdx + 3).trim()
+
+    val match = matches.firstOrNull {
+        it.homeTeam.equals(home, ignoreCase = true) &&
+            it.awayTeam.equals(away, ignoreCase = true)
+    } ?: return "Várakozik" to SecondaryColor
+
+    val hScore = match.homeScore.toIntOrNull()
+    val aScore = match.awayScore.toIntOrNull()
+    val finished = isMatchFinished(match)
+
+    if (hScore == null || aScore == null) {
+        return if (finished) "Lezárult" else match.matchTime to CyanAccent
+    }
+
+    val outcome = when {
+        hScore > aScore -> "1 ("
+        aScore > hScore -> "2 ("
+        else -> "X ("
+    }
+
+    val isWinning = pickPart.startsWith(outcome)
+    return when {
+        finished && isWinning -> "Találat" to AccentColor
+        finished && !isWinning -> "Nem jött be" to ErrorColor
+        isWinning -> "Nyerésre áll" to AccentColor
+        else -> "Jelenleg nem jó" to WarningColor
+    }
+}
+
 @Composable
 fun HomeScreen(
     preferences: SharedPreferences,
@@ -178,12 +228,16 @@ fun HomeScreen(
         )
     }
 
+    var dayOffset by remember {
+        mutableIntStateOf(0)
+    }
+
     var matches by remember {
         mutableStateOf<List<ScorexMatch>>(emptyList())
     }
 
     var statusMessage by remember {
-        mutableStateOf("Mai mérkőzések betöltése...")
+        mutableStateOf("Mérkőzések betöltése...")
     }
 
     var isLoading by remember {
@@ -198,7 +252,15 @@ fun HomeScreen(
         mutableStateOf("")
     }
 
-    LaunchedEffect(apiKey, refreshTrigger) {
+    val favoriteCount = remember(preferences, matches) {
+        preferences.getStringSet("favorite_leagues", emptySet()).orEmpty().size
+    }
+
+    val liveMatchesCount = remember(matches) {
+        matches.count { isMatchLive(it) }
+    }
+
+    LaunchedEffect(apiKey, dayOffset, refreshTrigger) {
 
         if (apiKey.isBlank()) {
             matches = emptyList()
@@ -209,20 +271,20 @@ fun HomeScreen(
         while (true) {
 
             isLoading = true
-            statusMessage = "Kapcsolódás a StatPalhoz..."
+            statusMessage = "Kapcsolódás a StatPalhoz (${formatOffsetLabel(dayOffset)})..."
 
             try {
 
                 val result = withContext(Dispatchers.IO) {
-                    StatPalApi.fetchLiveMatches(apiKey)
+                    StatPalApi.fetchLiveMatches(apiKey, dayOffset)
                 }
 
                 matches = result
 
                 statusMessage = if (result.isEmpty()) {
-                    "Jelenleg nincs megjeleníthető mérkőzés."
+                    "Jelenleg nincs megjeleníthető mérkőzés (${formatOffsetLabel(dayOffset)})."
                 } else {
-                    "${result.size} mérkőzés betöltve."
+                    "${result.size} mérkőzés betöltve (${formatOffsetLabel(dayOffset)})."
                 }
 
                 lastUpdated = java.text.SimpleDateFormat(
@@ -314,7 +376,88 @@ fun HomeScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Kompakt összefoglaló sáv
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            SummaryStatPill(
+                label = "MECCSEK",
+                value = matches.size.toString(),
+                accent = CyanAccent,
+                modifier = Modifier.weight(1f)
+            )
+            SummaryStatPill(
+                label = "ÉLŐ",
+                value = liveMatchesCount.toString(),
+                accent = AccentColor,
+                modifier = Modifier.weight(1f)
+            )
+            SummaryStatPill(
+                label = "KEDVENCEK",
+                value = favoriteCount.toString(),
+                accent = GoldAccent,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Nap / offset léptető sáv
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(CardColor)
+                .border(
+                    width = 1.dp,
+                    color = Color(0xFF243652),
+                    shape = RoundedCornerShape(14.dp)
+                )
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedButton(
+                onClick = { dayOffset-- },
+                enabled = !isLoading,
+                shape = RoundedCornerShape(10.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+            ) {
+                Text("‹ Előző", color = CyanAccent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = formatOffsetLabel(dayOffset),
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                if (dayOffset != 0) {
+                    Text(
+                        text = "Vissza mára",
+                        color = AccentColor,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.clickable { dayOffset = 0 }
+                    )
+                }
+            }
+
+            OutlinedButton(
+                onClick = { dayOffset++ },
+                enabled = !isLoading,
+                shape = RoundedCornerShape(10.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+            ) {
+                Text("Következő ›", color = CyanAccent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -323,7 +466,7 @@ fun HomeScreen(
         ) {
 
             Text(
-                text = "MAI MÉRKŐZÉSEK",
+                text = "MÉRKŐZÉSEK",
                 color = AccentColor,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold
@@ -531,20 +674,21 @@ fun HomeScreen(
                     text = if (savedTips.isEmpty()) {
                         "Koppints bármelyik mérkőzésre a részletekért, és adj hozzá tippeket (1 / X / 2) a szelvényedhez."
                     } else {
-                        "Elmentett tippjeid a mai mérkőzésekhez:"
+                        "Elmentett tippjeid és aktuális állásuk:"
                     },
                     color = SecondaryColor,
                     fontSize = 13.sp
                 )
 
                 savedTips.forEach { tip ->
+                    val (statusLabel, statusBadgeColor) = evaluateTipStatus(tip, matches)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
                             .background(BackgroundColor.copy(alpha = 0.65f))
                             .padding(horizontal = 12.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
@@ -554,6 +698,19 @@ fun HomeScreen(
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.weight(1f)
                         )
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(statusBadgeColor.copy(alpha = 0.18f))
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = statusLabel,
+                                color = statusBadgeColor,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                         Text(
                             text = "✕",
                             color = ErrorColor,
@@ -561,7 +718,7 @@ fun HomeScreen(
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier
                                 .clickable { onRemoveTip(tip) }
-                                .padding(start = 8.dp)
+                                .padding(start = 4.dp)
                         )
                     }
                 }
@@ -576,6 +733,40 @@ fun HomeScreen(
             color = SecondaryColor,
             fontSize = 11.sp,
             textAlign = TextAlign.Center
+        )
+    }
+}
+
+@Composable
+private fun SummaryStatPill(
+    label: String,
+    value: String,
+    accent: Color,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(CardColor)
+            .border(
+                width = 1.dp,
+                color = accent.copy(alpha = 0.30f),
+                shape = RoundedCornerShape(14.dp)
+            )
+            .padding(vertical = 10.dp, horizontal = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = value,
+            color = accent,
+            fontSize = 17.sp,
+            fontWeight = FontWeight.Black
+        )
+        Text(
+            text = label,
+            color = SecondaryColor,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold
         )
     }
 }
@@ -1451,7 +1642,7 @@ fun ApiSettingsScreen(
                                 val result = withContext(Dispatchers.IO) {
                                     try {
                                         val resultMatches =
-                                            StatPalApi.fetchLiveMatches(key)
+                                            StatPalApi.fetchLiveMatches(key, dayOffset)
 
                                         "Sikeres kapcsolat! Mérkőzések: ${resultMatches.size}."
 
