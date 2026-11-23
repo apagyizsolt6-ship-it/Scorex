@@ -1,4 +1,3 @@
-
 package hu.scorex.app
 
 import org.json.JSONArray
@@ -15,7 +14,9 @@ data class ScorexMatch(
     val awayTeam: String,
     val homeScore: String,
     val awayScore: String,
-    val matchTime: String
+    val matchTime: String,
+    val date: String = "",
+    val rawStatus: String = ""
 )
 
 object StatPalApi {
@@ -444,7 +445,6 @@ object StatPalApi {
             Azonosító: $matchId
             """.trimIndent()
 
-        // Hiányos csapatadat ellenőrzése.
         if (
             homeTeam.isBlank() ||
             awayTeam.isBlank()
@@ -470,7 +470,6 @@ object StatPalApi {
             return
         }
 
-        // Duplikált mérkőzés ellenőrzése.
         if (!seenMatchIds.add(matchId)) {
 
             stats.duplicateCount++
@@ -553,7 +552,9 @@ object StatPalApi {
                 awayTeam = awayTeam,
                 homeScore = homeScore,
                 awayScore = awayScore,
-                matchTime = matchTime
+                matchTime = matchTime,
+                date = date,
+                rawStatus = status
             )
         )
     }
