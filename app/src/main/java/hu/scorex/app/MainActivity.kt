@@ -143,9 +143,10 @@ fun ScorexApp(preferences: SharedPreferences) {
                             savedTips.clear()
                             persistTips()
                         },
-                        onRemoveTipsByStatuses = { statuses ->
+                        onRemoveSettledTips = { activeMatches ->
+                            val settledStatuses = setOf("Találat", "Nem jött be", "Lezárult")
                             savedTips.removeAll { tip ->
-                                evaluateTipStatus(tip, emptyList()).first in statuses
+                                evaluateTipStatus(tip, activeMatches).first in settledStatuses
                             }
                             persistTips()
                         },
@@ -225,7 +226,7 @@ fun HomeScreen(
     savedTips: List<String>,
     onRemoveTip: (String) -> Unit,
     onClearTips: () -> Unit,
-    onRemoveTipsByStatuses: (Set<String>) -> Unit,
+    onRemoveSettledTips: (List<ScorexMatch>) -> Unit,
     onSelectMatch: (ScorexMatch) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenApiData: () -> Unit
@@ -242,6 +243,10 @@ fun HomeScreen(
 
     var dayOffset by remember {
         mutableIntStateOf(0)
+    }
+
+    var autoRefresh by remember {
+        mutableStateOf(true)
     }
 
     var matches by remember {
@@ -286,7 +291,7 @@ fun HomeScreen(
         }
     }
 
-    LaunchedEffect(apiKey, dayOffset, refreshTrigger) {
+    LaunchedEffect(apiKey, dayOffset, refreshTrigger, autoRefresh) {
 
         if (apiKey.isBlank()) {
             matches = emptyList()
@@ -294,13 +299,11 @@ fun HomeScreen(
             return@LaunchedEffect
         }
 
-        while (true) {
-
+        do {
             isLoading = true
             statusMessage = "Kapcsolódás a StatPalhoz (${formatOffsetLabel(dayOffset)})..."
 
             try {
-
                 val result = withContext(Dispatchers.IO) {
                     StatPalApi.fetchLiveMatches(apiKey, dayOffset)
                 }
@@ -319,16 +322,16 @@ fun HomeScreen(
                 ).format(java.util.Date())
 
             } catch (exception: Exception) {
-
                 statusMessage = exception.message
                     ?: "Ismeretlen kapcsolódási hiba."
-
             } finally {
                 isLoading = false
             }
 
-            delay(15_000L)
-        }
+            if (autoRefresh) {
+                delay(15_000L)
+            }
+        } while (autoRefresh)
     }
 
     Column(
@@ -496,19 +499,48 @@ fun HomeScreen(
                 fontWeight = FontWeight.Bold
             )
 
-            OutlinedButton(
-                onClick = {
-                    refreshTrigger++
-                },
-                enabled = !isLoading && apiKey.isNotBlank(),
-                shape = RoundedCornerShape(12.dp)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "FRISSÍTÉS",
-                    color = CyanAccent,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            if (autoRefresh) AccentColor.copy(alpha = 0.16f)
+                            else CardColor
+                        )
+                        .border(
+                            width = 1.dp,
+                            color = if (autoRefresh) AccentColor else Color(0xFF283B57),
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                        .clickable { autoRefresh = !autoRefresh }
+                        .padding(horizontal = 9.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = if (autoRefresh) "AUTO: BE" else "AUTO: KI",
+                        color = if (autoRefresh) AccentColor else SecondaryColor,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        refreshTrigger++
+                    },
+                    enabled = !isLoading && apiKey.isNotBlank(),
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = "FRISSÍTÉS",
+                        color = CyanAccent,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
 
@@ -620,6 +652,7 @@ fun HomeScreen(
             LeagueSection(
                 matches = matches,
                 preferences = preferences,
+                savedTips = savedTips,
                 onSelectMatch = onSelectMatch
             )
         }
@@ -689,11 +722,7 @@ fun HomeScreen(
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(8.dp))
-                                    .clickable {
-                                        onRemoveTipsByStatuses(
-                                            setOf("Találat", "Nem jött be", "Lezárult")
-                                        )
-                                    }
+                                    .clickable { onRemoveSettledTips(matches) }
                                     .padding(horizontal = 6.dp, vertical = 4.dp)
                             )
                         }
@@ -1411,6 +1440,7 @@ private fun DiagnosticRow(
 @Composable
 fun LiveMatchCard(
     match: ScorexMatch,
+    hasSavedTip: Boolean = false,
     onClick: () -> Unit = {}
 ) {
     val isFinished = isMatchFinished(match)
@@ -1477,22 +1507,43 @@ fun LiveMatchCard(
 
                 Spacer(modifier = Modifier.width(8.dp))
 
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .background(statusColor.copy(alpha = 0.16f))
-                        .padding(horizontal = 9.dp, vertical = 3.dp)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = if (isLive && !match.matchTime.contains("ÉLŐ", true)) {
-                            "● ${match.matchTime}"
-                        } else {
-                            match.matchTime
-                        },
-                        color = statusColor,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    if (hasSavedTip) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(GoldAccent.copy(alpha = 0.18f))
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                text = "TIPP",
+                                color = GoldAccent,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(statusColor.copy(alpha = 0.16f))
+                            .padding(horizontal = 9.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = if (isLive && !match.matchTime.contains("ÉLŐ", true)) {
+                                "● ${match.matchTime}"
+                            } else {
+                                match.matchTime
+                            },
+                            color = statusColor,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
 
