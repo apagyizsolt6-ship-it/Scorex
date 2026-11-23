@@ -54,25 +54,44 @@ fun ScorexApp(preferences: SharedPreferences) {
         mutableStateOf(false)
     }
 
+    var showApiData by remember {
+        mutableStateOf(false)
+    }
+
     MaterialTheme {
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = BackgroundColor
         ) {
-            if (showSettings) {
-                ApiSettingsScreen(
-                    preferences = preferences,
-                    onBack = {
-                        showSettings = false
-                    }
-                )
-            } else {
-                HomeScreen(
-                    preferences = preferences,
-                    onOpenSettings = {
-                        showSettings = true
-                    }
-                )
+            when {
+                showApiData -> {
+                    ApiDataScreen(
+                        onBack = {
+                            showApiData = false
+                        }
+                    )
+                }
+
+                showSettings -> {
+                    ApiSettingsScreen(
+                        preferences = preferences,
+                        onBack = {
+                            showSettings = false
+                        }
+                    )
+                }
+
+                else -> {
+                    HomeScreen(
+                        preferences = preferences,
+                        onOpenSettings = {
+                            showSettings = true
+                        },
+                        onOpenApiData = {
+                            showApiData = true
+                        }
+                    )
+                }
             }
         }
     }
@@ -81,8 +100,10 @@ fun ScorexApp(preferences: SharedPreferences) {
 @Composable
 fun HomeScreen(
     preferences: SharedPreferences,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    onOpenApiData: () -> Unit
 ) {
+
     var apiKey by remember {
         mutableStateOf(
             preferences.getString(
@@ -165,8 +186,6 @@ fun HomeScreen(
             .padding(16.dp)
     ) {
 
-        // SCOREX FEJLÉC
-
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -210,16 +229,11 @@ fun HomeScreen(
                 ),
                 shape = RoundedCornerShape(15.dp)
             ) {
-                Text(
-                    text = "⚙",
-                    fontSize = 23.sp
-                )
+                Text("⚙", fontSize = 23.sp)
             }
         }
 
         Spacer(modifier = Modifier.height(26.dp))
-
-        // ÉLŐ MÉRKŐZÉSEK
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -280,8 +294,6 @@ fun HomeScreen(
         }
 
         Spacer(modifier = Modifier.height(14.dp))
-
-        // BAJNOKSÁGOK ÉS MÉRKŐZÉSEK
 
         if (matches.isEmpty()) {
 
@@ -355,9 +367,21 @@ fun HomeScreen(
             )
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-        // SCOREX TIPPEK
+        OutlinedButton(
+            onClick = onOpenApiData,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp)
+        ) {
+            Text(
+                text = "API ADATOK MEGTEKINTÉSE",
+                color = AccentColor,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
 
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -397,6 +421,89 @@ fun HomeScreen(
             fontSize = 11.sp,
             textAlign = TextAlign.Center
         )
+    }
+}
+
+@Composable
+fun ApiDataScreen(
+    onBack: () -> Unit
+) {
+
+    val rawResponse = StatPalApi.lastRawResponse
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(BackgroundColor)
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp)
+    ) {
+
+        OutlinedButton(onClick = onBack) {
+            Text(
+                text = "← VISSZA",
+                color = AccentColor
+            )
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Text(
+            text = "STATPAL API ADATOK",
+            color = AccentColor,
+            fontSize = 21.sp,
+            fontWeight = FontWeight.Black
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Text(
+            text = "Itt látható a legutóbbi API-válasz. A bajnokság mezőjét ebből fogjuk azonosítani.",
+            color = SecondaryColor,
+            fontSize = 13.sp
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = CardColor
+            ),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+
+            Column(
+                modifier = Modifier.padding(14.dp)
+            ) {
+
+                Text(
+                    text = if (rawResponse.isBlank()) {
+                        "Még nincs eltárolt API-válasz."
+                    } else {
+                        rawResponse
+                    },
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    lineHeight = 16.sp
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Button(
+            onClick = {
+                onBack()
+            },
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = AccentColor,
+                contentColor = BackgroundColor
+            )
+        ) {
+            Text("VISSZA A SCOREXHEZ")
+        }
     }
 }
 
@@ -522,9 +629,7 @@ fun ApiSettingsScreen(
             .padding(20.dp)
     ) {
 
-        OutlinedButton(
-            onClick = onBack
-        ) {
+        OutlinedButton(onClick = onBack) {
             Text(
                 text = "← VISSZA",
                 color = AccentColor
