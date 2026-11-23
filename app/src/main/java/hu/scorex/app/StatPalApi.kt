@@ -21,12 +21,31 @@ data class ScorexMatch(
 object StatPalApi {
 
     private const val BASE_URL =
-        "https://statpal.io/api/v2/soccer/matches/live"
+        "https://statpal.io/api/v2/soccer/matches/daily"
 
     @Volatile
     var lastRawResponse: String = ""
         private set
 
+    @Volatile
+    var lastLeagueCount: Int = 0
+        private set
+
+    @Volatile
+    var lastMatchCount: Int = 0
+        private set
+
+    /**
+     * A mai nap összes mérkőzésének lekérése.
+     *
+     * offset=0:
+     * mai mérkőzések
+     *
+     * Tartalmazza:
+     * - kezdés előtti mérkőzések
+     * - élő mérkőzések
+     * - befejezett mérkőzések
+     */
     fun fetchLiveMatches(apiKey: String): List<ScorexMatch> {
 
         require(apiKey.isNotBlank()) {
@@ -38,14 +57,18 @@ object StatPalApi {
             "UTF-8"
         )
 
-        val connection = URL(
-            "$BASE_URL?access_key=$encodedKey"
-        ).openConnection() as HttpURLConnection
+        val url = URL(
+            "$BASE_URL?offset=0&access_key=$encodedKey"
+        )
+
+        val connection =
+            url.openConnection() as HttpURLConnection
 
         try {
             connection.requestMethod = "GET"
             connection.connectTimeout = 15000
-            connection.readTimeout = 15000
+            connection.readTimeout = 30000
+
             connection.setRequestProperty(
                 "Accept",
                 "application/json"
@@ -72,6 +95,12 @@ object StatPalApi {
                         401, 403 ->
                             "Hibás API-kulcs vagy hozzáférés."
 
+                        400 ->
+                            "Hibás StatPal lekérdezés."
+
+                        404 ->
+                            "A StatPal napi végpont nem található."
+
                         429 ->
                             "API lekérési korlát elérve."
 
@@ -83,24 +112,29 @@ object StatPalApi {
 
             val root = JSONTokener(response).nextValue()
 
-            if (
-                root is JSONObject &&
-                !root.optBoolean("success", true)
-            ) {
-                throw Exception(
-                    root.optString(
-                        "message",
-                        "A StatPal hibát jelzett."
+            if (root is JSONObject) {
+                if (!root.optBoolean("success", true)) {
+                    throw Exception(
+                        root.optString(
+                            "message",
+                            "A StatPal hibát jelzett."
+                        )
                     )
-                )
+                }
             }
 
             val matches = mutableListOf<ScorexMatch>()
+            val leagueIds = mutableSetOf<String>()
 
-            // A teljes JSON-válasz feldolgozása.
-            collectAllLeagues(root, matches)
+            collectAllLeagues(
+                value = root,
+                output = matches,
+                leagueIds = leagueIds
+            )
 
-            // Nincs darabszámkorlát és nincs ID-alapú szűrés.
+            lastLeagueCount = leagueIds.size
+            lastMatchCount = matches.size
+
             return matches
 
         } finally {
@@ -109,27 +143,36 @@ object StatPalApi {
     }
 
     /**
-     * A teljes JSON-struktúrát bejárja.
-     * Minden olyan objektumot feldolgoz,
-     * amely tartalmaz egy match nevű tömböt.
+     * Végigjárja a teljes JSON-választ.
+     *
+     * Megkeresi a napi objektumot,
+     * azon belül a league tömböt,
+     * majd minden bajnokságot feldolgoz.
      */
     private fun collectAllLeagues(
         value: Any?,
-        output: MutableList<ScorexMatch>
+        output: MutableList<ScorexMatch>,
+        leagueIds: MutableSet<String>
     ) {
 
         when (value) {
 
             is JSONObject -> {
 
-                // Ha ez egy bajnokság objektuma,
-                // feldolgozzuk az összes mérkőzését.
-                if (value.optJSONArray("match") != null) {
-                    parseLeagueObject(value, output)
+                val leagueArray =
+                    value.optJSONArray("league")
+
+                if (leagueArray != null) {
+
+                    parseLeagueArray(
+                        leagueArray,
+                        output,
+                        leagueIds
+                    )
+
+                    return
                 }
 
-                // Minden további objektumot és tömböt
-                // külön is átvizsgálunk.
                 val iterator = value.keys()
 
                 while (iterator.hasNext()) {
@@ -140,7 +183,11 @@ object StatPalApi {
                         child is JSONObject ||
                         child is JSONArray
                     ) {
-                        collectAllLeagues(child, output)
+                        collectAllLeagues(
+                            child,
+                            output,
+                            leagueIds
+                        )
                     }
                 }
             }
@@ -148,9 +195,11 @@ object StatPalApi {
             is JSONArray -> {
 
                 for (i in 0 until value.length()) {
+
                     collectAllLeagues(
                         value.opt(i),
-                        output
+                        output,
+                        leagueIds
                     )
                 }
             }
@@ -158,30 +207,59 @@ object StatPalApi {
     }
 
     /**
-     * Egy bajnokság és az összes hozzá tartozó
-     * mérkőzés feldolgozása.
+     * Az összes bajnokság feldolgozása.
      */
-    private fun parseLeagueObject(
-        leagueObject: JSONObject,
-        output: MutableList<ScorexMatch>
+    private fun parseLeagueArray(
+        leagues: JSONArray,
+        output: MutableList<ScorexMatch>,
+        leagueIds: MutableSet<String>
     ) {
 
-        val leagueName = leagueObject
-            .optString("name")
-            .trim()
-            .ifBlank {
-                "Ismeretlen bajnokság"
-            }
+        for (i in 0 until leagues.length()) {
 
-        val matchArray =
-            leagueObject.optJSONArray("match")
-                ?: return
+            val leagueObject =
+                leagues.optJSONObject(i) ?: continue
+
+            val leagueName = leagueObject
+                .optString("name")
+                .trim()
+                .ifBlank {
+                    "Ismeretlen bajnokság"
+                }
+
+            val leagueId = leagueObject
+                .optString("id")
+                .ifBlank {
+                    leagueName
+                }
+
+            leagueIds.add(leagueId)
+
+            val matchArray =
+                leagueObject.optJSONArray("match")
+                    ?: continue
+
+            parseMatches(
+                matchArray,
+                leagueName,
+                output
+            )
+        }
+    }
+
+    /**
+     * Egy bajnokság összes mérkőzésének feldolgozása.
+     */
+    private fun parseMatches(
+        matchArray: JSONArray,
+        leagueName: String,
+        output: MutableList<ScorexMatch>
+    ) {
 
         for (i in 0 until matchArray.length()) {
 
             val matchObject =
-                matchArray.optJSONObject(i)
-                    ?: continue
+                matchArray.optJSONObject(i) ?: continue
 
             val homeObject =
                 matchObject.optJSONObject("home")
@@ -210,11 +288,10 @@ object StatPalApi {
                 .optString("date")
                 .trim()
 
-            val time = matchObject
+            val kickoff = matchObject
                 .optString("time")
                 .trim()
 
-            // Elsődleges és tartalék mérkőzésazonosítók.
             val matchId = matchObject
                 .optString("main_id")
                 .ifBlank {
@@ -227,7 +304,7 @@ object StatPalApi {
                     matchObject.optString("fallback_id_3")
                 }
                 .ifBlank {
-                    "$leagueName-$homeTeam-$awayTeam-$date-$time-$i"
+                    "$leagueName-$homeTeam-$awayTeam-$date-$kickoff-$i"
                 }
 
             val homeScore = homeObject
@@ -248,22 +325,28 @@ object StatPalApi {
                 .optString("inj_minute")
                 .trim()
 
-            val injuryTime = matchObject
-                .optString("inj_time")
-                .trim()
-
             val matchTime = when {
+
+                // Hosszabbításban megadott perc.
                 injuryMinute.isNotBlank() ->
                     injuryMinute
 
-                status.isNotBlank() ->
+                // Befejezett mérkőzés.
+                status.equals("FT", true) ->
+                    "FT"
+
+                // Félidő.
+                status.equals("HT", true) ->
+                    "HT"
+
+                // Élő mérkőzés státusza vagy perce.
+                status.isNotBlank() &&
+                    status !in listOf("NS", "TBD") ->
                     status
 
-                injuryTime.isNotBlank() ->
-                    injuryTime
-
-                time.isNotBlank() ->
-                    time
+                // Még el nem kezdődött mérkőzés.
+                kickoff.isNotBlank() ->
+                    kickoff
 
                 else ->
                     "ÉLŐ"
