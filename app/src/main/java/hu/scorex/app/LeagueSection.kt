@@ -1,24 +1,57 @@
-
 package hu.scorex.app
 
 import android.content.SharedPreferences
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.text.Collator
+import java.util.Locale
 
-private val LeagueBackground = Color(0xFF17243A)
+private val LeagueBackground = Color(0xFF152238)
+private val LeagueElevated = Color(0xFF1C2C47)
 private val LeagueGold = Color(0xFFFFC857)
 private val LeagueGreen = Color(0xFF35E0A1)
-private val LeagueText = Color(0xFF8B9BB4)
+private val LeagueCyan = Color(0xFF38BDF8)
+private val LeaguePurple = Color(0xFFA78BFA)
+private val LeagueCoral = Color(0xFFFF7A90)
+private val LeagueText = Color(0xFF94A3B8)
+
+private val AccentPalette = listOf(
+    LeagueGreen,
+    LeagueCyan,
+    LeaguePurple,
+    LeagueCoral,
+    Color(0xFF60A5FA),
+    Color(0xFF4ADE80),
+    Color(0xFFF472B6),
+    Color(0xFF2DD4BF)
+)
+
+private fun accentColorForLeague(
+    league: String,
+    translatedName: String,
+    isFavorite: Boolean
+): Color {
+    if (isFavorite) return LeagueGold
+    val key = translatedName.ifBlank { league }.lowercase(Locale("hu", "HU"))
+    if (key.startsWith("magyarország")) return Color(0xFFFF6B6B)
+    if (key.startsWith("nemzetközi") || key.startsWith("világ")) return LeaguePurple
+    val idx = (key.hashCode() and Int.MAX_VALUE) % AccentPalette.size
+    return AccentPalette[idx]
+}
 
 @Composable
 fun LeagueSection(
@@ -40,12 +73,34 @@ fun LeagueSection(
         mutableStateMapOf<String, Boolean>()
     }
 
+    val hungarianCollator = remember {
+        Collator.getInstance(Locale("hu", "HU")).apply {
+            strength = Collator.PRIMARY
+        }
+    }
+
     val groupedMatches = matches.groupBy {
         it.league.ifBlank { "Ismeretlen bajnokság" }
-    }.toSortedMap()
+    }
 
-    val allExpanded = groupedMatches.keys.all { league ->
-        expandedStates[league] ?: true
+    // Kedvencek előre, mindenki más (és a kedvencek is egymás között)
+    // a lefordított magyar név alapján, ékezeteket figyelembe véve ABC-sorrendben
+    val sortedEntries = remember(groupedMatches, favorites.toList(), hungarianCollator) {
+        groupedMatches.entries.sortedWith { a, b ->
+            val aFav = a.key in favorites
+            val bFav = b.key in favorites
+            if (aFav != bFav) {
+                if (aFav) -1 else 1
+            } else {
+                val nameA = translateLeagueName(a.key)
+                val nameB = translateLeagueName(b.key)
+                hungarianCollator.compare(nameA, nameB)
+            }
+        }
+    }
+
+    val allExpanded = sortedEntries.all { entry ->
+        expandedStates[entry.key] ?: true
     }
 
     Column(
@@ -54,31 +109,52 @@ fun LeagueSection(
 
         // Összes bajnokság nyitása és csukása
         Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(13.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(
+                    width = 1.dp,
+                    color = LeagueCyan.copy(alpha = 0.25f),
+                    shape = RoundedCornerShape(15.dp)
+                ),
+            shape = RoundedCornerShape(15.dp),
             colors = CardDefaults.cardColors(
-                containerColor = LeagueBackground
+                containerColor = Color.Transparent
             )
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .background(
+                        Brush.horizontalGradient(
+                            colors = listOf(
+                                Color(0xFF1A2D4A),
+                                Color(0xFF15243B)
+                            )
+                        )
+                    )
                     .clickable {
                         val newState = !allExpanded
-
-                        groupedMatches.keys.forEach { league ->
-                            expandedStates[league] = newState
+                        sortedEntries.forEach { entry ->
+                            expandedStates[entry.key] = newState
                         }
                     }
-                    .padding(horizontal = 16.dp, vertical = 13.dp),
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "⚽",
-                    fontSize = 20.sp
-                )
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(LeagueGreen.copy(alpha = 0.16f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "⚽",
+                        fontSize = 19.sp
+                    )
+                }
 
-                Spacer(Modifier.width(10.dp))
+                Spacer(Modifier.width(12.dp))
 
                 Column(
                     modifier = Modifier.weight(1f)
@@ -86,15 +162,15 @@ fun LeagueSection(
                     Text(
                         text = "Összes bajnokság",
                         color = Color.White,
-                        fontSize = 14.sp,
+                        fontSize = 15.sp,
                         fontWeight = FontWeight.Bold
                     )
 
                     Text(
                         text = if (allExpanded) {
-                            "Minden bajnokság nyitva"
+                            "Minden bajnokság nyitva • ${favorites.size} kedvenc"
                         } else {
-                            "Bajnokságok összecsukva"
+                            "Bajnokságok összecsukva • ${favorites.size} kedvenc"
                         },
                         color = LeagueText,
                         fontSize = 11.sp
@@ -104,21 +180,28 @@ fun LeagueSection(
                 Text(
                     text = if (allExpanded) "⌃" else "⌄",
                     color = LeagueGreen,
-                    fontSize = 29.sp,
+                    fontSize = 28.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
         }
 
-        groupedMatches.forEach { (league, leagueMatches) ->
+        sortedEntries.forEach { (league, leagueMatches) ->
 
             val expanded = expandedStates[league] ?: true
             val isFavorite = league in favorites
             val translatedLeague = translateLeagueName(league)
+            val accent = accentColorForLeague(league, translatedLeague, isFavorite)
 
             Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(15.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(
+                        width = if (isFavorite) 1.5.dp else 1.dp,
+                        color = accent.copy(alpha = if (isFavorite) 0.55f else 0.22f),
+                        shape = RoundedCornerShape(16.dp)
+                    ),
+                shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = LeagueBackground
                 )
@@ -128,22 +211,53 @@ fun LeagueSection(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .background(
+                                if (isFavorite) {
+                                    Brush.horizontalGradient(
+                                        colors = listOf(
+                                            LeagueGold.copy(alpha = 0.14f),
+                                            LeagueBackground
+                                        )
+                                    )
+                                } else {
+                                    Brush.horizontalGradient(
+                                        colors = listOf(
+                                            accent.copy(alpha = 0.08f),
+                                            LeagueBackground
+                                        )
+                                    )
+                                }
+                            )
                             .clickable {
                                 expandedStates[league] = !expanded
                             }
-                            .padding(15.dp),
+                            .padding(end = 14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-
-                        Text(
-                            text = if (isFavorite) "★" else "⚽",
-                            color = if (isFavorite) {
-                                LeagueGold
-                            } else {
-                                LeagueGreen
-                            },
-                            fontSize = 19.sp
+                        // Színes bal oldali sáv
+                        Box(
+                            modifier = Modifier
+                                .width(5.dp)
+                                .height(62.dp)
+                                .background(accent)
                         )
+
+                        Spacer(Modifier.width(12.dp))
+
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(accent.copy(alpha = 0.16f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (isFavorite) "★" else "⚽",
+                                color = accent,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
 
                         Spacer(Modifier.width(10.dp))
 
@@ -152,48 +266,79 @@ fun LeagueSection(
                         ) {
                             Text(
                                 text = translatedLeague,
-                                color = if (isFavorite) {
-                                    LeagueGold
-                                } else {
-                                    Color.White
-                                },
+                                color = if (isFavorite) LeagueGold else Color.White,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp
                             )
 
-                            Text(
-                                text = "${leagueMatches.size} mérkőzés",
-                                color = LeagueText,
-                                fontSize = 11.sp
-                            )
+                            Spacer(Modifier.height(4.dp))
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(50))
+                                        .background(accent.copy(alpha = 0.18f))
+                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "${leagueMatches.size} mérkőzés",
+                                        color = accent,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+
+                                if (isFavorite) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(50))
+                                            .background(LeagueGold.copy(alpha = 0.2f))
+                                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = "KEDVENC",
+                                            color = LeagueGold,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
                         }
 
                         Text(
                             text = if (isFavorite) "★" else "☆",
                             color = LeagueGold,
                             fontSize = 23.sp,
-                            modifier = Modifier.clickable {
-                                if (isFavorite) {
-                                    favorites.remove(league)
-                                } else {
-                                    favorites.add(league)
-                                }
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .clickable {
+                                    if (isFavorite) {
+                                        favorites.remove(league)
+                                    } else {
+                                        favorites.add(league)
+                                    }
 
-                                preferences.edit()
-                                    .putStringSet(
-                                        "favorite_leagues",
-                                        favorites.toSet()
-                                    )
-                                    .apply()
-                            }
+                                    preferences.edit()
+                                        .putStringSet(
+                                            "favorite_leagues",
+                                            favorites.toSet()
+                                        )
+                                        .apply()
+                                }
+                                .padding(4.dp)
                         )
 
-                        Spacer(Modifier.width(12.dp))
+                        Spacer(Modifier.width(8.dp))
 
                         Text(
                             text = if (expanded) "⌃" else "⌄",
-                            color = LeagueGreen,
-                            fontSize = 22.sp
+                            color = accent,
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
 
@@ -202,12 +347,13 @@ fun LeagueSection(
                             color = Color(0xFF263750)
                         )
 
-                        leagueMatches.forEach { match ->
-                            LiveMatchCard(match)
-
-                            HorizontalDivider(
-                                color = Color(0xFF263750)
-                            )
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            leagueMatches.forEach { match ->
+                                LiveMatchCard(match)
+                            }
                         }
                     }
                 }
