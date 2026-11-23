@@ -97,9 +97,11 @@ object StatPalApi {
 
             val matches = mutableListOf<ScorexMatch>()
 
-            collectLeagues(root, matches)
+            // A teljes JSON-válasz feldolgozása.
+            collectAllLeagues(root, matches)
 
-            return matches.distinctBy { it.id }
+            // Nincs darabszámkorlát és nincs ID-alapú szűrés.
+            return matches
 
         } finally {
             connection.disconnect()
@@ -107,13 +109,11 @@ object StatPalApi {
     }
 
     /**
-     * A StatPal válaszának feldolgozása.
-     *
-     * A bajnokságok a league tömbben találhatók.
-     * A bajnokság neve: league.name
-     * A mérkőzések: league.match
+     * A teljes JSON-struktúrát bejárja.
+     * Minden olyan objektumot feldolgoz,
+     * amely tartalmaz egy match nevű tömböt.
      */
-    private fun collectLeagues(
+    private fun collectAllLeagues(
         value: Any?,
         output: MutableList<ScorexMatch>
     ) {
@@ -122,25 +122,25 @@ object StatPalApi {
 
             is JSONObject -> {
 
-                // Megkeressük a bajnokságokat tartalmazó tömböt.
-                val leagues = value.optJSONArray("league")
-
-                if (leagues != null) {
-                    parseLeagueArray(leagues, output)
+                // Ha ez egy bajnokság objektuma,
+                // feldolgozzuk az összes mérkőzését.
+                if (value.optJSONArray("match") != null) {
+                    parseLeagueObject(value, output)
                 }
 
-                // A külső objektumokban tovább keresünk.
+                // Minden további objektumot és tömböt
+                // külön is átvizsgálunk.
                 val iterator = value.keys()
 
                 while (iterator.hasNext()) {
-                    val key = iterator.next()
-                    val child = value.opt(key)
+
+                    val child = value.opt(iterator.next())
 
                     if (
                         child is JSONObject ||
                         child is JSONArray
                     ) {
-                        collectLeagues(child, output)
+                        collectAllLeagues(child, output)
                     }
                 }
             }
@@ -148,7 +148,7 @@ object StatPalApi {
             is JSONArray -> {
 
                 for (i in 0 until value.length()) {
-                    collectLeagues(
+                    collectAllLeagues(
                         value.opt(i),
                         output
                     )
@@ -158,117 +158,128 @@ object StatPalApi {
     }
 
     /**
-     * Egy bajnokságlista feldolgozása.
+     * Egy bajnokság és az összes hozzá tartozó
+     * mérkőzés feldolgozása.
      */
-    private fun parseLeagueArray(
-        leagues: JSONArray,
+    private fun parseLeagueObject(
+        leagueObject: JSONObject,
         output: MutableList<ScorexMatch>
     ) {
 
-        for (i in 0 until leagues.length()) {
+        val leagueName = leagueObject
+            .optString("name")
+            .trim()
+            .ifBlank {
+                "Ismeretlen bajnokság"
+            }
 
-            val leagueObject =
-                leagues.optJSONObject(i) ?: continue
+        val matchArray =
+            leagueObject.optJSONArray("match")
+                ?: return
 
-            // A bajnokság neve a league objektumban van.
-            val leagueName = leagueObject
-                .optString("name")
-                .trim()
-                .ifBlank {
-                    "Ismeretlen bajnokság"
-                }
+        for (i in 0 until matchArray.length()) {
 
-            // Az adott bajnokság mérkőzései.
-            val matchArray =
-                leagueObject.optJSONArray("match")
+            val matchObject =
+                matchArray.optJSONObject(i)
                     ?: continue
 
-            for (j in 0 until matchArray.length()) {
+            val homeObject =
+                matchObject.optJSONObject("home")
 
-                val matchObject =
-                    matchArray.optJSONObject(j)
-                        ?: continue
+            val awayObject =
+                matchObject.optJSONObject("away")
 
-                val homeObject =
-                    matchObject.optJSONObject("home")
+            val homeTeam = homeObject
+                ?.optString("name")
+                .orEmpty()
+                .trim()
 
-                val awayObject =
-                    matchObject.optJSONObject("away")
+            val awayTeam = awayObject
+                ?.optString("name")
+                .orEmpty()
+                .trim()
 
-                val homeTeam = homeObject
-                    ?.optString("name")
-                    .orEmpty()
-                    .trim()
-
-                val awayTeam = awayObject
-                    ?.optString("name")
-                    .orEmpty()
-                    .trim()
-
-                if (
-                    homeTeam.isBlank() ||
-                    awayTeam.isBlank()
-                ) {
-                    continue
-                }
-
-                val matchId = matchObject
-                    .optString("main_id")
-                    .ifBlank {
-                        matchObject.optString("id")
-                    }
-                    .ifBlank {
-                        "$homeTeam-$awayTeam"
-                    }
-
-                val homeScore = homeObject
-                    ?.optString("goals")
-                    .orEmpty()
-                    .ifBlank { "-" }
-
-                val awayScore = awayObject
-                    ?.optString("goals")
-                    .orEmpty()
-                    .ifBlank { "-" }
-
-                val status = matchObject
-                    .optString("status")
-                    .trim()
-
-                val injuryMinute = matchObject
-                    .optString("inj_minute")
-                    .trim()
-
-                val injuryTime = matchObject
-                    .optString("inj_time")
-                    .trim()
-
-                val matchTime = when {
-                    injuryMinute.isNotBlank() ->
-                        injuryMinute
-
-                    status.isNotBlank() ->
-                        status
-
-                    injuryTime.isNotBlank() ->
-                        injuryTime
-
-                    else ->
-                        "ÉLŐ"
-                }
-
-                output.add(
-                    ScorexMatch(
-                        id = matchId,
-                        league = leagueName,
-                        homeTeam = homeTeam,
-                        awayTeam = awayTeam,
-                        homeScore = homeScore,
-                        awayScore = awayScore,
-                        matchTime = matchTime
-                    )
-                )
+            if (
+                homeTeam.isBlank() ||
+                awayTeam.isBlank()
+            ) {
+                continue
             }
+
+            val date = matchObject
+                .optString("date")
+                .trim()
+
+            val time = matchObject
+                .optString("time")
+                .trim()
+
+            // Elsődleges és tartalék mérkőzésazonosítók.
+            val matchId = matchObject
+                .optString("main_id")
+                .ifBlank {
+                    matchObject.optString("fallback_id_1")
+                }
+                .ifBlank {
+                    matchObject.optString("fallback_id_2")
+                }
+                .ifBlank {
+                    matchObject.optString("fallback_id_3")
+                }
+                .ifBlank {
+                    "$leagueName-$homeTeam-$awayTeam-$date-$time-$i"
+                }
+
+            val homeScore = homeObject
+                ?.optString("goals")
+                .orEmpty()
+                .ifBlank { "-" }
+
+            val awayScore = awayObject
+                ?.optString("goals")
+                .orEmpty()
+                .ifBlank { "-" }
+
+            val status = matchObject
+                .optString("status")
+                .trim()
+
+            val injuryMinute = matchObject
+                .optString("inj_minute")
+                .trim()
+
+            val injuryTime = matchObject
+                .optString("inj_time")
+                .trim()
+
+            val matchTime = when {
+                injuryMinute.isNotBlank() ->
+                    injuryMinute
+
+                status.isNotBlank() ->
+                    status
+
+                injuryTime.isNotBlank() ->
+                    injuryTime
+
+                time.isNotBlank() ->
+                    time
+
+                else ->
+                    "ÉLŐ"
+            }
+
+            output.add(
+                ScorexMatch(
+                    id = matchId,
+                    league = leagueName,
+                    homeTeam = homeTeam,
+                    awayTeam = awayTeam,
+                    homeScore = homeScore,
+                    awayScore = awayScore,
+                    matchTime = matchTime
+                )
+            )
         }
     }
 }
