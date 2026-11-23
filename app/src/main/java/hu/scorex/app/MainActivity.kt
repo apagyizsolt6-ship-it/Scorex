@@ -112,10 +112,6 @@ fun HomeScreen(
         mutableStateOf("")
     }
 
-    val scope = rememberCoroutineScope()
-
-    // Élő mérkőzések automatikus frissítése
-
     LaunchedEffect(apiKey, refreshTrigger) {
 
         if (apiKey.isBlank()) {
@@ -169,7 +165,7 @@ fun HomeScreen(
             .padding(16.dp)
     ) {
 
-        // FEJLÉC
+        // SCOREX FEJLÉC
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -223,7 +219,7 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(26.dp))
 
-        // ÉLŐ MÉRKŐZÉSEK FEJLÉC
+        // ÉLŐ MÉRKŐZÉSEK
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -285,7 +281,7 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // MÉRKŐZÉSLISTA
+        // BAJNOKSÁGOK ÉS MÉRKŐZÉSEK
 
         if (matches.isEmpty()) {
 
@@ -353,16 +349,10 @@ fun HomeScreen(
 
         } else {
 
-            matches
-                .sortedBy {
-                    it.league.lowercase()
-                }
-                .forEach { match ->
-
-                    LiveMatchCard(match)
-
-                    Spacer(modifier = Modifier.height(10.dp))
-                }
+            LeagueSection(
+                matches = matches,
+                preferences = preferences
+            )
         }
 
         Spacer(modifier = Modifier.height(24.dp))
