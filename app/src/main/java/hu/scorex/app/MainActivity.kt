@@ -10,6 +10,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -68,12 +69,46 @@ fun ScorexApp(preferences: SharedPreferences) {
         mutableStateOf(false)
     }
 
+    var selectedMatch by remember {
+        mutableStateOf<ScorexMatch?>(null)
+    }
+
+    val savedTips = remember {
+        mutableStateListOf<String>().apply {
+            addAll(
+                preferences.getStringSet("scorex_tips", emptySet())
+                    .orEmpty()
+                    .sorted()
+            )
+        }
+    }
+
+    fun toggleTip(tipLabel: String) {
+        if (tipLabel in savedTips) {
+            savedTips.remove(tipLabel)
+        } else {
+            savedTips.add(tipLabel)
+        }
+        preferences.edit()
+            .putStringSet("scorex_tips", savedTips.toSet())
+            .apply()
+    }
+
     MaterialTheme {
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = BackgroundColor
         ) {
             when {
+                selectedMatch != null -> {
+                    MatchDetailScreen(
+                        match = selectedMatch!!,
+                        savedTips = savedTips,
+                        onToggleTip = ::toggleTip,
+                        onBack = { selectedMatch = null }
+                    )
+                }
+
                 showApiData -> {
                     ApiDataScreen(
                         onBack = {
@@ -94,6 +129,16 @@ fun ScorexApp(preferences: SharedPreferences) {
                 else -> {
                     HomeScreen(
                         preferences = preferences,
+                        savedTips = savedTips,
+                        onRemoveTip = { tip ->
+                            savedTips.remove(tip)
+                            preferences.edit()
+                                .putStringSet("scorex_tips", savedTips.toSet())
+                                .apply()
+                        },
+                        onSelectMatch = { match ->
+                            selectedMatch = match
+                        },
                         onOpenSettings = {
                             showSettings = true
                         },
@@ -110,6 +155,9 @@ fun ScorexApp(preferences: SharedPreferences) {
 @Composable
 fun HomeScreen(
     preferences: SharedPreferences,
+    savedTips: List<String>,
+    onRemoveTip: (String) -> Unit,
+    onSelectMatch: (ScorexMatch) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenApiData: () -> Unit
 ) {
@@ -397,7 +445,8 @@ fun HomeScreen(
 
             LeagueSection(
                 matches = matches,
-                preferences = preferences
+                preferences = preferences,
+                onSelectMatch = onSelectMatch
             )
         }
 
@@ -441,23 +490,55 @@ fun HomeScreen(
                             )
                         )
                     )
-                    .padding(18.dp)
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
 
                 Text(
-                    text = "SCOREX TIPPEK",
+                    text = "SCOREX TIPPEK (${savedTips.size})",
                     color = GoldAccent,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
-
                 Text(
-                    text = "Saját tippjeid, mérkőzés-előrejelzések és fogadási szelvény.",
+                    text = if (savedTips.isEmpty()) {
+                        "Koppints bármelyik mérkőzésre a részletekért, és adj hozzá tippeket (1 / X / 2) a szelvényedhez."
+                    } else {
+                        "Elmentett tippjeid a mai mérkőzésekhez:"
+                    },
                     color = SecondaryColor,
-                    fontSize = 14.sp
+                    fontSize = 13.sp
                 )
+
+                savedTips.forEach { tip ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(BackgroundColor.copy(alpha = 0.65f))
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = tip,
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = "✕",
+                            color = ErrorColor,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clickable { onRemoveTip(tip) }
+                                .padding(start = 8.dp)
+                        )
+                    }
+                }
             }
         }
 
@@ -470,6 +551,254 @@ fun HomeScreen(
             fontSize = 11.sp,
             textAlign = TextAlign.Center
         )
+    }
+}
+
+@Composable
+fun MatchDetailScreen(
+    match: ScorexMatch,
+    savedTips: List<String>,
+    onToggleTip: (String) -> Unit,
+    onBack: () -> Unit
+) {
+    val live = isMatchLive(match)
+    val finished = match.matchTime.equals("FT", ignoreCase = true) ||
+        match.rawStatus.equals("FT", ignoreCase = true)
+    val translatedLeague = translateLeagueName(match.league)
+
+    val homeGoalsInt = match.homeScore.toIntOrNull()
+    val awayGoalsInt = match.awayScore.toIntOrNull()
+
+    val summaryText = when {
+        homeGoalsInt != null && awayGoalsInt != null -> when {
+            homeGoalsInt > awayGoalsInt -> "${match.homeTeam} vezet / áll ${match.homeScore}–${match.awayScore} arányban."
+            awayGoalsInt > homeGoalsInt -> "${match.awayTeam} vezet / áll ${match.homeScore}–${match.awayScore} arányban."
+            else -> "Kiegyenlített állás: ${match.homeScore}–${match.awayScore}."
+        }
+        finished -> "A mérkőzés véget ért (${match.homeScore} – ${match.awayScore})."
+        live -> "A mérkőzés folyamatban van (${match.matchTime})."
+        else -> "Még nem kezdődött el vagy frissítésre vár (${match.matchTime})."
+    }
+
+    val tipOptions = listOf(
+        "1 (${match.homeTeam})",
+        "X (Döntetlen)",
+        "2 (${match.awayTeam})"
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(BackgroundColor)
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        OutlinedButton(onClick = onBack) {
+            Text(
+                text = "← VISSZA",
+                color = AccentColor
+            )
+        }
+
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(
+                    width = 1.dp,
+                    color = if (live) AccentColor.copy(alpha = 0.5f) else CyanAccent.copy(alpha = 0.25f),
+                    shape = RoundedCornerShape(20.dp)
+                ),
+            colors = CardDefaults.cardColors(containerColor = CardColor),
+            shape = RoundedCornerShape(20.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0xFF1A2D4A),
+                                CardColor
+                            )
+                        )
+                    )
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Text(
+                    text = translatedLeague,
+                    color = CyanAccent,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(
+                                if (live) AccentColor.copy(alpha = 0.2f)
+                                else CyanAccent.copy(alpha = 0.15f)
+                            )
+                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = if (live) "● ÉLŐ • ${match.matchTime}" else match.matchTime,
+                            color = if (live) AccentColor else CyanAccent,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    if (match.date.isNotBlank()) {
+                        Text(
+                            text = match.date,
+                            color = SecondaryColor,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = match.homeTeam,
+                        color = Color.White,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    Text(
+                        text = "${match.homeScore}  :  ${match.awayScore}",
+                        color = GoldAccent,
+                        fontSize = 26.sp,
+                        fontWeight = FontWeight.Black,
+                        modifier = Modifier.padding(horizontal = 12.dp)
+                    )
+
+                    Text(
+                        text = match.awayTeam,
+                        color = Color.White,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.End,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                HorizontalDivider(color = Color(0xFF263750))
+
+                Text(
+                    text = summaryText,
+                    color = SecondaryColor,
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp
+                )
+            }
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = CardColor),
+            shape = RoundedCornerShape(18.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "MÉRKŐZÉS ADATAI",
+                    color = AccentColor,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                DiagnosticRow(label = "Eredeti bajnokság", value = match.league)
+                DiagnosticRow(label = "Állapot / Idő", value = match.matchTime, valueColor = AccentColor)
+                if (match.rawStatus.isNotBlank()) {
+                    DiagnosticRow(label = "API státuszkód", value = match.rawStatus)
+                }
+                if (match.date.isNotBlank()) {
+                    DiagnosticRow(label = "Dátum", value = match.date)
+                }
+                DiagnosticRow(label = "Azonosító", value = match.id)
+            }
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = CardColor),
+            shape = RoundedCornerShape(18.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "TIPP HOZZÁADÁSA A SZELVÉNYHEZ",
+                    color = GoldAccent,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                tipOptions.forEach { option ->
+                    val fullTip = "${match.homeTeam} – ${match.awayTeam}: $option"
+                    val isSaved = fullTip in savedTips
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                if (isSaved) GoldAccent.copy(alpha = 0.18f)
+                                else BackgroundColor
+                            )
+                            .border(
+                                width = 1.dp,
+                                color = if (isSaved) GoldAccent else Color(0xFF263750),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            .clickable { onToggleTip(fullTip) }
+                            .padding(horizontal = 14.dp, vertical = 11.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = option,
+                            color = if (isSaved) GoldAccent else Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = if (isSaved) "✓ Mentve" else "+ Felvétel",
+                            color = if (isSaved) GoldAccent else AccentColor,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+
+        Button(
+            onClick = onBack,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = AccentColor,
+                contentColor = BackgroundColor
+            )
+        ) {
+            Text("VISSZA A MÉRKŐZÉSEKHEZ")
+        }
     }
 }
 
@@ -774,14 +1103,13 @@ private fun DiagnosticRow(
 }
 
 @Composable
-fun LiveMatchCard(match: ScorexMatch) {
-    val isFinished = match.matchTime.equals("FT", ignoreCase = true)
-    val isLive = !isFinished && (
-        match.matchTime.equals("ÉLŐ", ignoreCase = true) ||
-            match.matchTime.equals("HT", ignoreCase = true) ||
-            match.matchTime.contains("'") ||
-            match.matchTime.contains("+")
-        )
+fun LiveMatchCard(
+    match: ScorexMatch,
+    onClick: () -> Unit = {}
+) {
+    val isFinished = match.matchTime.equals("FT", ignoreCase = true) ||
+        match.rawStatus.equals("FT", ignoreCase = true)
+    val isLive = isMatchLive(match)
 
     val statusColor = when {
         isLive -> AccentColor
@@ -802,7 +1130,8 @@ fun LiveMatchCard(match: ScorexMatch) {
                 width = 1.dp,
                 color = statusColor.copy(alpha = if (isLive) 0.45f else 0.16f),
                 shape = RoundedCornerShape(16.dp)
-            ),
+            )
+            .clickable { onClick() },
         colors = CardDefaults.cardColors(
             containerColor = CardColor
         ),
