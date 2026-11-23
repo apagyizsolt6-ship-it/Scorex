@@ -86,6 +86,7 @@ private fun accentColorForLeague(
 fun LeagueSection(
     matches: List<ScorexMatch>,
     preferences: SharedPreferences,
+    savedTips: List<String> = emptyList(),
     onSelectMatch: (ScorexMatch) -> Unit = {}
 ) {
     val favorites = remember {
@@ -577,8 +578,11 @@ fun LeagueSection(
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             leagueMatches.forEach { match ->
+                                val prefix = "${match.homeTeam} – ${match.awayTeam}: "
+                                val hasTip = savedTips.any { it.startsWith(prefix, ignoreCase = true) }
                                 LiveMatchCard(
                                     match = match,
+                                    hasSavedTip = hasTip,
                                     onClick = { onSelectMatch(match) }
                                 )
                             }
@@ -724,6 +728,11 @@ private fun translateCompetitionWords(original: String): String {
         "Super Cup" to "Szuperkupa",
         "League Cup" to "Ligakupa",
         "National Cup" to "Nemzeti kupa",
+        "FA Cup" to "FA-kupa",
+        "Copa del Rey" to "Copa del Rey",
+        "Coppa Italia" to "Olasz Kupa",
+        "DFB-Pokal" to "Német Kupa",
+        "Coupe de France" to "Francia Kupa",
         "Cup" to "Kupa",
         "Women" to "Női",
         "Woman" to "Női",
@@ -739,6 +748,7 @@ private fun translateCompetitionWords(original: String): String {
         "First Division" to "Első osztály",
         "Second Division" to "Másodosztály",
         "Third Division" to "Harmadosztály",
+        "Segunda División" to "Másodosztály",
         "Premier League" to "Premier League",
         "Champions League" to "Bajnokok Ligája",
         "Europa League" to "Európa-liga",
@@ -751,10 +761,18 @@ private fun translateCompetitionWords(original: String): String {
         "Championship" to "Bajnokság",
         "Serie A" to "Serie A",
         "Serie B" to "Serie B",
+        "Serie C" to "Serie C",
         "La Liga" to "La Liga",
         "Bundesliga" to "Bundesliga",
         "Ligue 1" to "Ligue 1",
-        "Ligue 2" to "Ligue 2"
+        "Ligue 2" to "Ligue 2",
+        "Eredivisie" to "Eredivisie",
+        "Primeira Liga" to "Primeira Liga",
+        "Allsvenskan" to "Allsvenskan",
+        "Eliteserien" to "Eliteserien",
+        "Super Lig" to "Süper Lig",
+        "Apertura" to "Apertura",
+        "Clausura" to "Clausura"
     )
 
     var result = original
