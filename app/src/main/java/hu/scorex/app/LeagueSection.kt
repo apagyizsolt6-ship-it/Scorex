@@ -42,7 +42,8 @@ private val AccentPalette = listOf(
 private enum class LeagueFilter(val label: String) {
     ALL("Mind"),
     FAVORITES("Kedvencek"),
-    LIVE("Élő")
+    LIVE("Élő"),
+    FINISHED("Befejezett")
 }
 
 fun isMatchLive(match: ScorexMatch): Boolean {
@@ -55,6 +56,11 @@ fun isMatchLive(match: ScorexMatch): Boolean {
         match.rawStatus.equals("LIVE", ignoreCase = true) ||
         match.matchTime.contains("'") ||
         match.matchTime.contains("+")
+}
+
+fun isMatchFinished(match: ScorexMatch): Boolean {
+    return match.matchTime.equals("FT", ignoreCase = true) ||
+        match.rawStatus.equals("FT", ignoreCase = true)
 }
 
 private fun accentColorForLeague(
@@ -115,6 +121,7 @@ fun LeagueSection(
                 LeagueFilter.ALL -> true
                 LeagueFilter.FAVORITES -> leagueKey in favorites
                 LeagueFilter.LIVE -> isMatchLive(match)
+                LeagueFilter.FINISHED -> isMatchFinished(match)
             }
 
             val matchesSearch = q.isEmpty() ||
@@ -157,7 +164,6 @@ fun LeagueSection(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
 
-        // Keresés és gyors szűrők
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -212,7 +218,7 @@ fun LeagueSection(
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     LeagueFilter.entries.forEach { filter ->
                         val selected = activeFilter == filter
@@ -220,6 +226,7 @@ fun LeagueSection(
                             LeagueFilter.ALL -> LeagueCyan
                             LeagueFilter.FAVORITES -> LeagueGold
                             LeagueFilter.LIVE -> LeagueGreen
+                            LeagueFilter.FINISHED -> LeaguePurple
                         }
 
                         Box(
@@ -242,7 +249,7 @@ fun LeagueSection(
                             Text(
                                 text = filter.label,
                                 color = if (selected) chipColor else LeagueText,
-                                fontSize = 12.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -269,7 +276,6 @@ fun LeagueSection(
             return@Column
         }
 
-        // Összes bajnokság nyitása és csukása
         Card(
             modifier = Modifier
                 .fillMaxWidth()
