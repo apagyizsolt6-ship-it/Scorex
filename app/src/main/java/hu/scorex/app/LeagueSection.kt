@@ -577,6 +577,7 @@ fun translateLeagueName(original: String): String {
         "croatia" to "Horvátország",
         "cyprus" to "Ciprus",
         "czech republic" to "Csehország",
+        "czechia" to "Csehország",
         "denmark" to "Dánia",
         "ecuador" to "Ecuador",
         "egypt" to "Egyiptom",
@@ -639,6 +640,7 @@ fun translateLeagueName(original: String): String {
         "thailand" to "Thaiföld",
         "tunisia" to "Tunézia",
         "turkey" to "Törökország",
+        "türkiye" to "Törökország",
         "ukraine" to "Ukrajna",
         "united arab emirates" to "Egyesült Arab Emírségek",
         "united states" to "Egyesült Államok",
@@ -704,7 +706,14 @@ private fun translateCompetitionWords(original: String): String {
         "Round of 16" to "Nyolcaddöntő",
         "Quarter-finals" to "Negyeddöntő",
         "Semi-finals" to "Elődöntő",
-        "Final" to "Döntő"
+        "Final" to "Döntő",
+        "Championship" to "Bajnokság",
+        "Serie A" to "Serie A",
+        "Serie B" to "Serie B",
+        "La Liga" to "La Liga",
+        "Bundesliga" to "Bundesliga",
+        "Ligue 1" to "Ligue 1",
+        "Ligue 2" to "Ligue 2"
     )
 
     var result = original
