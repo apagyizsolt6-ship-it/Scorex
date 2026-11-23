@@ -21,7 +21,6 @@ import java.text.Collator
 import java.util.Locale
 
 private val LeagueBackground = Color(0xFF152238)
-private val LeagueElevated = Color(0xFF1C2C47)
 private val LeagueGold = Color(0xFFFFC857)
 private val LeagueGreen = Color(0xFF35E0A1)
 private val LeagueCyan = Color(0xFF38BDF8)
@@ -83,8 +82,6 @@ fun LeagueSection(
         it.league.ifBlank { "Ismeretlen bajnokság" }
     }
 
-    // Kedvencek előre, mindenki más (és a kedvencek is egymás között)
-    // a lefordított magyar név alapján, ékezeteket figyelembe véve ABC-sorrendben
     val sortedEntries = remember(groupedMatches, favorites.toList(), hungarianCollator) {
         groupedMatches.entries.sortedWith { a, b ->
             val aFav = a.key in favorites
@@ -234,7 +231,6 @@ fun LeagueSection(
                             .padding(end = 14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Színes bal oldali sáv
                         Box(
                             modifier = Modifier
                                 .width(5.dp)
