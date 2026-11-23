@@ -1,8 +1,12 @@
 
 package hu.scorex.app
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.SharedPreferences
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -118,7 +122,7 @@ fun HomeScreen(
     }
 
     var statusMessage by remember {
-        mutableStateOf("Élő mérkőzések betöltése...")
+        mutableStateOf("Mai mérkőzések betöltése...")
     }
 
     var isLoading by remember {
@@ -155,9 +159,9 @@ fun HomeScreen(
                 matches = result
 
                 statusMessage = if (result.isEmpty()) {
-                    "Jelenleg nincs élő mérkőzés."
+                    "Jelenleg nincs megjeleníthető mérkőzés."
                 } else {
-                    "${result.size} élő mérkőzés betöltve."
+                    "${result.size} mérkőzés betöltve."
                 }
 
                 lastUpdated = java.text.SimpleDateFormat(
@@ -242,7 +246,7 @@ fun HomeScreen(
         ) {
 
             Text(
-                text = "ÉLŐ MÉRKŐZÉSEK",
+                text = "MAI MÉRKŐZÉSEK",
                 color = AccentColor,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold
@@ -325,7 +329,7 @@ fun HomeScreen(
                         } else if (isLoading) {
                             "MÉRKŐZÉSEK BETÖLTÉSE"
                         } else {
-                            "NINCS ÉLŐ MÉRKŐZÉS"
+                            "NINCS MEGJELENÍTHETŐ MÉRKŐZÉS"
                         },
                         color = Color.White,
                         fontSize = 15.sp,
@@ -431,6 +435,8 @@ fun ApiDataScreen(
 
     val rawResponse = StatPalApi.lastRawResponse
 
+    val context = androidx.compose.ui.platform.LocalContext.current
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -458,12 +464,76 @@ fun ApiDataScreen(
         Spacer(modifier = Modifier.height(10.dp))
 
         Text(
-            text = "Itt látható a legutóbbi API-válasz. A bajnokság mezőjét ebből fogjuk azonosítani.",
+            text = "Itt látható a legutóbbi API-válasz. A bajnokságok és mérkőzések adatait ebből ellenőrizzük.",
             color = SecondaryColor,
             fontSize = 13.sp
         )
 
         Spacer(modifier = Modifier.height(16.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+
+            Text(
+                text = "NYERS API-VÁLASZ",
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            FilledTonalButton(
+                onClick = {
+
+                    if (rawResponse.isNotBlank()) {
+
+                        val clipboard =
+                            context.getSystemService(
+                                Context.CLIPBOARD_SERVICE
+                            ) as ClipboardManager
+
+                        val clip = ClipData.newPlainText(
+                            "Scorex StatPal API válasz",
+                            rawResponse
+                        )
+
+                        clipboard.setPrimaryClip(clip)
+
+                        Toast.makeText(
+                            context,
+                            "API-adatok vágólapra másolva!",
+                            Toast.LENGTH_SHORT
+                        ).show()
+
+                    } else {
+
+                        Toast.makeText(
+                            context,
+                            "Nincs másolható API-adat.",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                },
+                enabled = rawResponse.isNotBlank(),
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = Color(0xFF263750),
+                    contentColor = AccentColor,
+                    disabledContentColor = SecondaryColor
+                ),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+
+                Text(
+                    text = "⧉  MÁSOLÁS",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
 
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -778,7 +848,7 @@ fun ApiSettingsScreen(
                                         val resultMatches =
                                             StatPalApi.fetchLiveMatches(key)
 
-                                        "Sikeres kapcsolat! Élő meccsek: ${resultMatches.size}."
+                                        "Sikeres kapcsolat! Mérkőzések: ${resultMatches.size}."
 
                                     } catch (exception: Exception) {
                                         exception.message
