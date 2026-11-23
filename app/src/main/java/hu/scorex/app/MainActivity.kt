@@ -83,15 +83,19 @@ fun ScorexApp(preferences: SharedPreferences) {
         }
     }
 
+    fun persistTips() {
+        preferences.edit()
+            .putStringSet("scorex_tips", savedTips.toSet())
+            .apply()
+    }
+
     fun toggleTip(tipLabel: String) {
         if (tipLabel in savedTips) {
             savedTips.remove(tipLabel)
         } else {
             savedTips.add(tipLabel)
         }
-        preferences.edit()
-            .putStringSet("scorex_tips", savedTips.toSet())
-            .apply()
+        persistTips()
     }
 
     MaterialTheme {
@@ -132,9 +136,11 @@ fun ScorexApp(preferences: SharedPreferences) {
                         savedTips = savedTips,
                         onRemoveTip = { tip ->
                             savedTips.remove(tip)
-                            preferences.edit()
-                                .putStringSet("scorex_tips", savedTips.toSet())
-                                .apply()
+                            persistTips()
+                        },
+                        onClearTips = {
+                            savedTips.clear()
+                            persistTips()
                         },
                         onSelectMatch = { match ->
                             selectedMatch = match
@@ -157,6 +163,7 @@ fun HomeScreen(
     preferences: SharedPreferences,
     savedTips: List<String>,
     onRemoveTip: (String) -> Unit,
+    onClearTips: () -> Unit,
     onSelectMatch: (ScorexMatch) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenApiData: () -> Unit
@@ -494,12 +501,31 @@ fun HomeScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
 
-                Text(
-                    text = "SCOREX TIPPEK (${savedTips.size})",
-                    color = GoldAccent,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "SCOREX TIPPEK (${savedTips.size})",
+                        color = GoldAccent,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    if (savedTips.isNotEmpty()) {
+                        Text(
+                            text = "ÖSSZES TÖRLÉSE",
+                            color = ErrorColor,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { onClearTips() }
+                                .padding(horizontal = 6.dp, vertical = 4.dp)
+                        )
+                    }
+                }
 
                 Text(
                     text = if (savedTips.isEmpty()) {
@@ -562,8 +588,7 @@ fun MatchDetailScreen(
     onBack: () -> Unit
 ) {
     val live = isMatchLive(match)
-    val finished = match.matchTime.equals("FT", ignoreCase = true) ||
-        match.rawStatus.equals("FT", ignoreCase = true)
+    val finished = isMatchFinished(match)
     val translatedLeague = translateLeagueName(match.league)
 
     val homeGoalsInt = match.homeScore.toIntOrNull()
@@ -722,7 +747,10 @@ fun MatchDetailScreen(
                     fontWeight = FontWeight.Bold
                 )
                 DiagnosticRow(label = "Eredeti bajnokság", value = match.league)
-                DiagnosticRow(label = "Állapot / Idő", value = match.matchTime, valueColor = AccentColor)
+                DiagnosticRow(label = "Állapot / Kezdés (helyi)", value = match.matchTime, valueColor = AccentColor)
+                if (match.rawKickoff.isNotBlank()) {
+                    DiagnosticRow(label = "API kezdési idő (UTC)", value = match.rawKickoff)
+                }
                 if (match.rawStatus.isNotBlank()) {
                     DiagnosticRow(label = "API státuszkód", value = match.rawStatus)
                 }
@@ -1107,8 +1135,7 @@ fun LiveMatchCard(
     match: ScorexMatch,
     onClick: () -> Unit = {}
 ) {
-    val isFinished = match.matchTime.equals("FT", ignoreCase = true) ||
-        match.rawStatus.equals("FT", ignoreCase = true)
+    val isFinished = isMatchFinished(match)
     val isLive = isMatchLive(match)
 
     val statusColor = when {
