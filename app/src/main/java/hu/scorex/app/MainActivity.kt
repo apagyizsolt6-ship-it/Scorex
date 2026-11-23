@@ -471,6 +471,64 @@ fun ApiDataScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        // FELDOLGOZÁSI ELLENŐRZÉS
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = CardColor
+            ),
+            shape = RoundedCornerShape(14.dp)
+        ) {
+
+            Column(
+                modifier = Modifier.padding(14.dp)
+            ) {
+
+                Text(
+                    text = "FELDOLGOZÁSI ELLENŐRZÉS",
+                    color = AccentColor,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Text(
+                    text = "Bajnokságok: ${StatPalApi.lastLeagueCount}",
+                    color = Color.White,
+                    fontSize = 13.sp
+                )
+
+                Spacer(modifier = Modifier.height(5.dp))
+
+                Text(
+                    text = "API-meccsek: ${StatPalApi.lastApiMatchCount}",
+                    color = Color.White,
+                    fontSize = 13.sp
+                )
+
+                Spacer(modifier = Modifier.height(5.dp))
+
+                Text(
+                    text = "Feldolgozott meccsek: ${StatPalApi.lastParsedMatchCount}",
+                    color = AccentColor,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(5.dp))
+
+                Text(
+                    text = "Kihagyott / duplikált: ${StatPalApi.lastSkippedMatchCount}",
+                    color = Color(0xFFFFB74D),
+                    fontSize = 13.sp
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
