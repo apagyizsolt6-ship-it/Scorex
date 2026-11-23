@@ -63,6 +63,12 @@ fun isMatchFinished(match: ScorexMatch): Boolean {
         match.rawStatus.equals("FT", ignoreCase = true)
 }
 
+private fun matchSortRank(match: ScorexMatch): Int = when {
+    isMatchLive(match) -> 0
+    !isMatchFinished(match) -> 1
+    else -> 2
+}
+
 private fun accentColorForLeague(
     league: String,
     translatedName: String,
@@ -91,6 +97,17 @@ fun LeagueSection(
                 ) ?: emptySet()
             )
         }
+    }
+
+    LaunchedEffect(preferences) {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
+            if (key == "favorite_leagues") {
+                val updated = prefs.getStringSet("favorite_leagues", emptySet()).orEmpty()
+                favorites.clear()
+                favorites.addAll(updated)
+            }
+        }
+        preferences.registerOnSharedPreferenceChangeListener(listener)
     }
 
     val expandedStates = remember {
@@ -138,7 +155,11 @@ fun LeagueSection(
         filteredMatches
             .groupBy { it.league.ifBlank { "Ismeretlen bajnokság" } }
             .mapValues { (_, leagueList) ->
-                leagueList.sortedByDescending { isMatchLive(it) }
+                leagueList.sortedWith(
+                    compareBy<ScorexMatch> { matchSortRank(it) }
+                        .thenBy { it.matchTime }
+                        .thenBy { it.homeTeam }
+                )
             }
     }
 
@@ -266,12 +287,32 @@ fun LeagueSection(
                     containerColor = LeagueBackground
                 )
             ) {
-                Text(
-                    text = "Nincs találat a megadott szűrőkre vagy keresésre.",
-                    color = LeagueText,
-                    fontSize = 13.sp,
-                    modifier = Modifier.padding(18.dp)
-                )
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "Nincs találat a megadott szűrőkre vagy keresésre.",
+                        color = LeagueText,
+                        fontSize = 13.sp
+                    )
+                    if (searchQuery.isNotBlank() || activeFilter != LeagueFilter.ALL) {
+                        OutlinedButton(
+                            onClick = {
+                                searchQuery = ""
+                                activeFilter = LeagueFilter.ALL
+                            },
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text(
+                                text = "SZŰRŐK TÖRLÉSE",
+                                color = LeagueCyan,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
             }
             return@Column
         }
