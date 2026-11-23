@@ -23,6 +23,10 @@ object StatPalApi {
     private const val BASE_URL =
         "https://statpal.io/api/v2/soccer/matches/live"
 
+    @Volatile
+    var lastRawResponse: String = ""
+        private set
+
     fun fetchLiveMatches(apiKey: String): List<ScorexMatch> {
 
         require(apiKey.isNotBlank()) {
@@ -42,6 +46,7 @@ object StatPalApi {
             connection.requestMethod = "GET"
             connection.connectTimeout = 15000
             connection.readTimeout = 15000
+
             connection.setRequestProperty(
                 "Accept",
                 "application/json"
@@ -59,12 +64,20 @@ object StatPalApi {
                 }.orEmpty()
             }
 
+            // A nyers válasz eltárolása a telefonos hibakereséshez.
+            lastRawResponse = response
+
             if (code !in 200..299) {
                 throw Exception(
                     when (code) {
-                        401, 403 -> "Hibás API-kulcs vagy hozzáférés."
-                        429 -> "API lekérési korlát elérve."
-                        else -> "StatPal HTTP hiba: $code"
+                        401, 403 ->
+                            "Hibás API-kulcs vagy hozzáférés."
+
+                        429 ->
+                            "API lekérési korlát elérve."
+
+                        else ->
+                            "StatPal HTTP hiba: $code"
                     }
                 )
             }
@@ -72,9 +85,7 @@ object StatPalApi {
             val root = JSONTokener(response).nextValue()
 
             if (root is JSONObject) {
-                if (
-                    root.optBoolean("success", true).not()
-                ) {
+                if (!root.optBoolean("success", true)) {
                     throw Exception(
                         root.optString(
                             "message",
@@ -129,6 +140,7 @@ object StatPalApi {
                             ).ifBlank {
                                 "$home-$away"
                             },
+
                             league = getNestedString(
                                 value,
                                 "league",
@@ -138,16 +150,20 @@ object StatPalApi {
                             ).ifBlank {
                                 "Ismeretlen bajnokság"
                             },
+
                             homeTeam = home,
                             awayTeam = away,
+
                             homeScore = getScore(
                                 value,
                                 true
                             ),
+
                             awayScore = getScore(
                                 value,
                                 false
                             ),
+
                             matchTime = getString(
                                 value,
                                 "minute",
@@ -178,7 +194,10 @@ object StatPalApi {
 
             is JSONArray -> {
                 for (i in 0 until value.length()) {
-                    collectMatches(value.opt(i), output)
+                    collectMatches(
+                        value.opt(i),
+                        output
+                    )
                 }
             }
         }
@@ -188,9 +207,11 @@ object StatPalApi {
         json: JSONObject,
         vararg keys: String
     ): String {
+
         val value = getValue(json, *keys)
 
         return when (value) {
+
             is JSONObject -> getString(
                 value,
                 "name",
@@ -231,11 +252,20 @@ object StatPalApi {
             return value.toString()
         }
 
-        val scores = getValue(json, "scores", "score")
+        val scores = getValue(
+            json,
+            "scores",
+            "score"
+        )
 
         if (scores is JSONObject) {
+
             val side = if (home) "home" else "away"
-            val sideValue = getValue(scores, side)
+
+            val sideValue = getValue(
+                scores,
+                side
+            )
 
             if (sideValue != null) {
                 return sideValue.toString()
@@ -253,6 +283,7 @@ object StatPalApi {
         val value = getValue(json, *keys)
 
         return when (value) {
+
             is JSONObject -> getString(
                 value,
                 "name",
@@ -270,16 +301,20 @@ object StatPalApi {
         json: JSONObject,
         vararg keys: String
     ): String {
+
         val value = getValue(json, *keys)
 
         return when (value) {
+
             null, JSONObject.NULL -> ""
+
             is JSONObject -> getString(
                 value,
                 "name",
                 "value",
                 "title"
             )
+
             else -> value.toString()
         }
     }
@@ -298,11 +333,15 @@ object StatPalApi {
         val iterator = json.keys()
 
         while (iterator.hasNext()) {
+
             val actualKey = iterator.next()
 
             if (
                 keys.any {
-                    it.equals(actualKey, ignoreCase = true)
+                    it.equals(
+                        actualKey,
+                        ignoreCase = true
+                    )
                 } && !json.isNull(actualKey)
             ) {
                 return json.opt(actualKey)
