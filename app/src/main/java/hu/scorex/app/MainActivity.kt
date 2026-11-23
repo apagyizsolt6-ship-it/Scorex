@@ -1,4 +1,3 @@
-
 package hu.scorex.app
 
 import android.content.ClipData
@@ -10,6 +9,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -18,6 +18,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -51,6 +53,9 @@ private val AccentColor = Color(0xFF35E0A1)
 private val SecondaryColor = Color(0xFF8B9BB4)
 private val ErrorColor = Color(0xFFFF7777)
 private val WarningColor = Color(0xFFFFB74D)
+private val CyanAccent = Color(0xFF38BDF8)
+private val PurpleAccent = Color(0xFFA78BFA)
+private val GoldAccent = Color(0xFFFFC857)
 
 @Composable
 fun ScorexApp(preferences: SharedPreferences) {
@@ -192,7 +197,23 @@ fun HomeScreen(
     ) {
 
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
+                .background(
+                    Brush.horizontalGradient(
+                        colors = listOf(
+                            Color(0xFF132238),
+                            Color(0xFF0E1829)
+                        )
+                    )
+                )
+                .border(
+                    width = 1.dp,
+                    color = AccentColor.copy(alpha = 0.22f),
+                    shape = RoundedCornerShape(18.dp)
+                )
+                .padding(horizontal = 16.dp, vertical = 14.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -220,7 +241,7 @@ fun HomeScreen(
 
                 Text(
                     text = "ÉLD ÁT A FUTBALLT",
-                    color = SecondaryColor,
+                    color = CyanAccent,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -238,7 +259,7 @@ fun HomeScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(26.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -262,8 +283,9 @@ fun HomeScreen(
             ) {
                 Text(
                     text = "FRISSÍTÉS",
-                    color = AccentColor,
-                    fontSize = 11.sp
+                    color = CyanAccent,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
                 )
             }
         }
@@ -292,8 +314,9 @@ fun HomeScreen(
             if (lastUpdated.isNotBlank()) {
                 Text(
                     text = lastUpdated,
-                    color = SecondaryColor,
-                    fontSize = 10.sp
+                    color = CyanAccent,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold
                 )
             }
         }
@@ -303,7 +326,13 @@ fun HomeScreen(
         if (matches.isEmpty()) {
 
             Card(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(
+                        width = 1.dp,
+                        color = CyanAccent.copy(alpha = 0.25f),
+                        shape = RoundedCornerShape(20.dp)
+                    ),
                 colors = CardDefaults.cardColors(
                     containerColor = CardColor
                 ),
@@ -381,7 +410,7 @@ fun HomeScreen(
         ) {
             Text(
                 text = "API ADATOK MEGTEKINTÉSE",
-                color = AccentColor,
+                color = CyanAccent,
                 fontWeight = FontWeight.Bold
             )
         }
@@ -389,7 +418,13 @@ fun HomeScreen(
         Spacer(modifier = Modifier.height(24.dp))
 
         Card(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(
+                    width = 1.dp,
+                    color = PurpleAccent.copy(alpha = 0.35f),
+                    shape = RoundedCornerShape(20.dp)
+                ),
             colors = CardDefaults.cardColors(
                 containerColor = CardColor
             ),
@@ -397,12 +432,21 @@ fun HomeScreen(
         ) {
 
             Column(
-                modifier = Modifier.padding(18.dp)
+                modifier = Modifier
+                    .background(
+                        Brush.horizontalGradient(
+                            colors = listOf(
+                                PurpleAccent.copy(alpha = 0.14f),
+                                CardColor
+                            )
+                        )
+                    )
+                    .padding(18.dp)
             ) {
 
                 Text(
                     text = "SCOREX TIPPEK",
-                    color = Color.White,
+                    color = GoldAccent,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -482,8 +526,6 @@ fun ApiDataScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // ÖSSZESÍTETT FELDOLGOZÁSI ELLENŐRZÉS
-
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
@@ -554,8 +596,6 @@ fun ApiDataScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // RÉSZLETES KIHAGYÁSI LISTA
-
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
@@ -595,8 +635,6 @@ fun ApiDataScreen(
         }
 
         Spacer(modifier = Modifier.height(16.dp))
-
-        // NYERS API-VÁLASZ
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -737,17 +775,57 @@ private fun DiagnosticRow(
 
 @Composable
 fun LiveMatchCard(match: ScorexMatch) {
+    val isFinished = match.matchTime.equals("FT", ignoreCase = true)
+    val isLive = !isFinished && (
+        match.matchTime.equals("ÉLŐ", ignoreCase = true) ||
+            match.matchTime.equals("HT", ignoreCase = true) ||
+            match.matchTime.contains("'") ||
+            match.matchTime.contains("+")
+        )
+
+    val statusColor = when {
+        isLive -> AccentColor
+        isFinished -> SecondaryColor
+        else -> CyanAccent
+    }
+
+    val scoreColor = when {
+        isLive -> GoldAccent
+        isFinished -> Color.White
+        else -> AccentColor
+    }
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                width = 1.dp,
+                color = statusColor.copy(alpha = if (isLive) 0.45f else 0.16f),
+                shape = RoundedCornerShape(16.dp)
+            ),
         colors = CardDefaults.cardColors(
             containerColor = CardColor
         ),
-        shape = RoundedCornerShape(18.dp)
+        shape = RoundedCornerShape(16.dp)
     ) {
 
         Column(
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier
+                .background(
+                    if (isLive) {
+                        Brush.horizontalGradient(
+                            colors = listOf(
+                                AccentColor.copy(alpha = 0.10f),
+                                CardColor
+                            )
+                        )
+                    } else {
+                        Brush.horizontalGradient(
+                            colors = listOf(CardColor, CardColor)
+                        )
+                    }
+                )
+                .padding(14.dp)
         ) {
 
             Row(
@@ -759,19 +837,32 @@ fun LiveMatchCard(match: ScorexMatch) {
                 Text(
                     text = match.league,
                     color = SecondaryColor,
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                     modifier = Modifier.weight(1f)
                 )
 
-                Text(
-                    text = match.matchTime,
-                    color = AccentColor,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Spacer(modifier = Modifier.width(8.dp))
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(statusColor.copy(alpha = 0.16f))
+                        .padding(horizontal = 9.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = if (isLive && !match.matchTime.contains("ÉLŐ", true)) {
+                            "● ${match.matchTime}"
+                        } else {
+                            match.matchTime
+                        },
+                        color = statusColor,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -789,7 +880,7 @@ fun LiveMatchCard(match: ScorexMatch) {
                         fontWeight = FontWeight.Bold
                     )
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     Text(
                         text = match.awayTeam,
@@ -805,17 +896,17 @@ fun LiveMatchCard(match: ScorexMatch) {
 
                     Text(
                         text = match.homeScore,
-                        color = AccentColor,
-                        fontSize = 23.sp,
+                        color = scoreColor,
+                        fontSize = 22.sp,
                         fontWeight = FontWeight.Black
                     )
 
-                    Spacer(modifier = Modifier.height(5.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
 
                     Text(
                         text = match.awayScore,
-                        color = AccentColor,
-                        fontSize = 23.sp,
+                        color = scoreColor,
+                        fontSize = 22.sp,
                         fontWeight = FontWeight.Black
                     )
                 }
