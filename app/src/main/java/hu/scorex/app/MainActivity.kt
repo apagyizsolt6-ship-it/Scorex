@@ -20,9 +20,10 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import java.net.HttpURLConnection
-import java.net.URL
-import java.net.URLEncoder
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
 
@@ -44,11 +45,14 @@ private val BackgroundColor = Color(0xFF080D18)
 private val CardColor = Color(0xFF121C2D)
 private val AccentColor = Color(0xFF35E0A1)
 private val SecondaryColor = Color(0xFF8B9BB4)
+private val ErrorColor = Color(0xFFFF7777)
 
 @Composable
 fun ScorexApp(preferences: SharedPreferences) {
 
-    var showSettings by remember { mutableStateOf(false) }
+    var showSettings by remember {
+        mutableStateOf(false)
+    }
 
     MaterialTheme {
         Surface(
@@ -64,6 +68,7 @@ fun ScorexApp(preferences: SharedPreferences) {
                 )
             } else {
                 HomeScreen(
+                    preferences = preferences,
                     onOpenSettings = {
                         showSettings = true
                     }
@@ -75,8 +80,87 @@ fun ScorexApp(preferences: SharedPreferences) {
 
 @Composable
 fun HomeScreen(
+    preferences: SharedPreferences,
     onOpenSettings: () -> Unit
 ) {
+    var apiKey by remember {
+        mutableStateOf(
+            preferences.getString(
+                "statpal_api_key",
+                ""
+            ).orEmpty()
+        )
+    }
+
+    var matches by remember {
+        mutableStateOf<List<ScorexMatch>>(emptyList())
+    }
+
+    var statusMessage by remember {
+        mutableStateOf("Élő mérkőzések betöltése...")
+    }
+
+    var isLoading by remember {
+        mutableStateOf(false)
+    }
+
+    var refreshTrigger by remember {
+        mutableIntStateOf(0)
+    }
+
+    var lastUpdated by remember {
+        mutableStateOf("")
+    }
+
+    val scope = rememberCoroutineScope()
+
+    // Élő mérkőzések automatikus frissítése
+
+    LaunchedEffect(apiKey, refreshTrigger) {
+
+        if (apiKey.isBlank()) {
+            matches = emptyList()
+            statusMessage = "Állítsd be a StatPal API-kulcsodat."
+            return@LaunchedEffect
+        }
+
+        while (true) {
+
+            isLoading = true
+            statusMessage = "Kapcsolódás a StatPalhoz..."
+
+            try {
+
+                val result = withContext(Dispatchers.IO) {
+                    StatPalApi.fetchLiveMatches(apiKey)
+                }
+
+                matches = result
+
+                statusMessage = if (result.isEmpty()) {
+                    "Jelenleg nincs élő mérkőzés."
+                } else {
+                    "${result.size} élő mérkőzés betöltve."
+                }
+
+                lastUpdated = java.text.SimpleDateFormat(
+                    "HH:mm:ss",
+                    java.util.Locale.getDefault()
+                ).format(java.util.Date())
+
+            } catch (exception: Exception) {
+
+                statusMessage = exception.message
+                    ?: "Ismeretlen kapcsolódási hiba."
+
+            } finally {
+                isLoading = false
+            }
+
+            delay(15_000L)
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -84,15 +168,21 @@ fun HomeScreen(
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
+
+        // FEJLÉC
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+
             Column {
+
                 Row(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+
                     Text(
                         text = "SCORE",
                         color = Color.White,
@@ -122,47 +212,162 @@ fun HomeScreen(
                     containerColor = AccentColor,
                     contentColor = BackgroundColor
                 ),
-                shape = RoundedCornerShape(16.dp)
+                shape = RoundedCornerShape(15.dp)
             ) {
                 Text(
                     text = "⚙",
-                    fontSize = 24.sp
+                    fontSize = 23.sp
                 )
             }
         }
 
+        Spacer(modifier = Modifier.height(26.dp))
+
+        // ÉLŐ MÉRKŐZÉSEK FEJLÉC
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+
+            Text(
+                text = "ÉLŐ MÉRKŐZÉSEK",
+                color = AccentColor,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            OutlinedButton(
+                onClick = {
+                    refreshTrigger++
+                },
+                enabled = !isLoading && apiKey.isNotBlank(),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text(
+                    text = "FRISSÍTÉS",
+                    color = AccentColor,
+                    fontSize = 11.sp
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+
+            Text(
+                text = if (isLoading) {
+                    "Adatok frissítése..."
+                } else {
+                    statusMessage
+                },
+                color = if (
+                    statusMessage.contains("hiba", true) ||
+                    statusMessage.contains("hibás", true)
+                ) ErrorColor else SecondaryColor,
+                fontSize = 11.sp,
+                modifier = Modifier.weight(1f)
+            )
+
+            if (lastUpdated.isNotBlank()) {
+                Text(
+                    text = lastUpdated,
+                    color = SecondaryColor,
+                    fontSize = 10.sp
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // MÉRKŐZÉSLISTA
+
+        if (matches.isEmpty()) {
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = CardColor
+                ),
+                shape = RoundedCornerShape(20.dp)
+            ) {
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+
+                    Text(
+                        text = if (isLoading) "⚽" else "📡",
+                        fontSize = 36.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = if (apiKey.isBlank()) {
+                            "STATPAL API-KULCS SZÜKSÉGES"
+                        } else if (isLoading) {
+                            "MÉRKŐZÉSEK BETÖLTÉSE"
+                        } else {
+                            "NINCS ÉLŐ MÉRKŐZÉS"
+                        },
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = statusMessage,
+                        color = SecondaryColor,
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center
+                    )
+
+                    if (apiKey.isBlank()) {
+
+                        Spacer(modifier = Modifier.height(15.dp))
+
+                        Button(
+                            onClick = onOpenSettings,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = AccentColor,
+                                contentColor = BackgroundColor
+                            )
+                        ) {
+                            Text("API-KULCS BEÁLLÍTÁSA")
+                        }
+                    }
+                }
+            }
+
+        } else {
+
+            matches
+                .sortedBy {
+                    it.league.lowercase()
+                }
+                .forEach { match ->
+
+                    LiveMatchCard(match)
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+        }
+
         Spacer(modifier = Modifier.height(24.dp))
 
-        Text(
-            text = "ÉLŐ MÉRKŐZÉSEK",
-            color = AccentColor,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        MatchCard(
-            league = "Premier League",
-            homeTeam = "Manchester City",
-            awayTeam = "Liverpool",
-            homeScore = "–",
-            awayScore = "–",
-            matchTime = "Minta"
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        MatchCard(
-            league = "La Liga",
-            homeTeam = "Real Madrid",
-            awayTeam = "Barcelona",
-            homeScore = "–",
-            awayScore = "–",
-            matchTime = "Minta"
-        )
-
-        Spacer(modifier = Modifier.height(24.dp))
+        // SCOREX TIPPEK
 
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -171,9 +376,11 @@ fun HomeScreen(
             ),
             shape = RoundedCornerShape(20.dp)
         ) {
+
             Column(
                 modifier = Modifier.padding(18.dp)
             ) {
+
                 Text(
                     text = "SCOREX TIPPEK",
                     color = Color.White,
@@ -184,7 +391,7 @@ fun HomeScreen(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = "Hamarosan elérhető a saját tippfogadási szelvényed.",
+                    text = "Saját tippjeid, mérkőzés-előrejelzések és fogadási szelvény.",
                     color = SecondaryColor,
                     fontSize = 14.sp
                 )
@@ -194,12 +401,101 @@ fun HomeScreen(
         Spacer(modifier = Modifier.height(24.dp))
 
         Text(
-            text = "A mérkőzések jelenleg bemutatóadatok.",
-            color = SecondaryColor,
-            fontSize = 12.sp,
+            text = "SCOREX • FOOTBALL CENTER",
             modifier = Modifier.fillMaxWidth(),
+            color = SecondaryColor,
+            fontSize = 11.sp,
             textAlign = TextAlign.Center
         )
+    }
+}
+
+@Composable
+fun LiveMatchCard(match: ScorexMatch) {
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = CardColor
+        ),
+        shape = RoundedCornerShape(18.dp)
+    ) {
+
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+
+                Text(
+                    text = match.league,
+                    color = SecondaryColor,
+                    fontSize = 12.sp,
+                    modifier = Modifier.weight(1f)
+                )
+
+                Text(
+                    text = match.matchTime,
+                    color = AccentColor,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+
+                Column(
+                    modifier = Modifier.weight(1f)
+                ) {
+
+                    Text(
+                        text = match.homeTeam,
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Text(
+                        text = match.awayTeam,
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Column(
+                    horizontalAlignment = Alignment.End
+                ) {
+
+                    Text(
+                        text = match.homeScore,
+                        color = AccentColor,
+                        fontSize = 23.sp,
+                        fontWeight = FontWeight.Black
+                    )
+
+                    Spacer(modifier = Modifier.height(5.dp))
+
+                    Text(
+                        text = match.awayScore,
+                        color = AccentColor,
+                        fontSize = 23.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -208,9 +504,13 @@ fun ApiSettingsScreen(
     preferences: SharedPreferences,
     onBack: () -> Unit
 ) {
+
     var apiKey by remember {
         mutableStateOf(
-            preferences.getString("statpal_api_key", "") ?: ""
+            preferences.getString(
+                "statpal_api_key",
+                ""
+            ).orEmpty()
         )
     }
 
@@ -222,6 +522,8 @@ fun ApiSettingsScreen(
         mutableStateOf(false)
     }
 
+    val scope = rememberCoroutineScope()
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -229,13 +531,17 @@ fun ApiSettingsScreen(
             .verticalScroll(rememberScrollState())
             .padding(20.dp)
     ) {
-        Text(
-            text = "← VISSZA",
-            color = AccentColor,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 24.dp)
-        )
+
+        OutlinedButton(
+            onClick = onBack
+        ) {
+            Text(
+                text = "← VISSZA",
+                color = AccentColor
+            )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
 
         Text(
             text = "SCOREX",
@@ -260,9 +566,11 @@ fun ApiSettingsScreen(
             ),
             shape = RoundedCornerShape(20.dp)
         ) {
+
             Column(
                 modifier = Modifier.padding(18.dp)
             ) {
+
                 Text(
                     text = "StatPal API-kulcs",
                     color = Color.White,
@@ -297,18 +605,30 @@ fun ApiSettingsScreen(
                     )
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 Button(
                     onClick = {
-                        preferences.edit()
-                            .putString(
-                                "statpal_api_key",
-                                apiKey.trim()
-                            )
-                            .apply()
 
-                        statusText = "API-kulcs elmentve."
+                        val key = apiKey.trim()
+
+                        if (key.isBlank()) {
+
+                            statusText = "Hiányzik az API-kulcs."
+
+                        } else {
+
+                            apiKey = key
+
+                            preferences.edit()
+                                .putString(
+                                    "statpal_api_key",
+                                    key
+                                )
+                                .apply()
+
+                            statusText = "API-kulcs sikeresen elmentve."
+                        }
                     },
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(
@@ -323,7 +643,9 @@ fun ApiSettingsScreen(
 
                 OutlinedButton(
                     onClick = {
+
                         apiKey = ""
+
                         preferences.edit()
                             .remove("statpal_api_key")
                             .apply()
@@ -333,37 +655,45 @@ fun ApiSettingsScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = "KULCS TÖRLÉSE",
+                        "KULCS TÖRLÉSE",
                         color = Color.White
                     )
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
                 Button(
                     onClick = {
+
                         val key = apiKey.trim()
 
                         if (key.isBlank()) {
+
                             statusText = "Először add meg az API-kulcsot."
-                        } else {
-                            preferences.edit()
-                                .putString(
-                                    "statpal_api_key",
-                                    key
-                                )
-                                .apply()
+
+                        } else if (!isTesting) {
 
                             isTesting = true
-                            statusText = "Kapcsolódás a StatPal API-hoz..."
+                            statusText = "StatPal kapcsolat tesztelése..."
 
-                            testStatPalConnection(
-                                key = key,
-                                onResult = { result ->
-                                    statusText = result
-                                    isTesting = false
+                            scope.launch {
+
+                                val result = withContext(Dispatchers.IO) {
+                                    try {
+                                        val resultMatches =
+                                            StatPalApi.fetchLiveMatches(key)
+
+                                        "Sikeres kapcsolat! Élő meccsek: ${resultMatches.size}."
+
+                                    } catch (exception: Exception) {
+                                        exception.message
+                                            ?: "Kapcsolódási hiba."
+                                    }
                                 }
-                            )
+
+                                statusText = result
+                                isTesting = false
+                            }
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
@@ -373,6 +703,7 @@ fun ApiSettingsScreen(
                         contentColor = Color.White
                     )
                 ) {
+
                     Text(
                         if (isTesting) {
                             "TESZTELÉS..."
@@ -386,8 +717,11 @@ fun ApiSettingsScreen(
 
                 Text(
                     text = statusText,
-                    color = AccentColor,
-                    fontSize = 14.sp
+                    color = if (
+                        statusText.contains("hiba", true) ||
+                        statusText.contains("hibás", true)
+                    ) ErrorColor else AccentColor,
+                    fontSize = 13.sp
                 )
             }
         }
@@ -395,7 +729,7 @@ fun ApiSettingsScreen(
         Spacer(modifier = Modifier.height(20.dp))
 
         Text(
-            text = "Az API-kulcs az alkalmazás saját tárhelyére kerül mentésre.",
+            text = "Az API-kulcsot az alkalmazás helyben tárolja. Nem szükséges a GitHub-forráskódba beírnod.",
             color = SecondaryColor,
             fontSize = 12.sp
         )
@@ -411,140 +745,6 @@ fun ApiSettingsScreen(
             )
         ) {
             Text("VISSZA A SCOREXHEZ")
-        }
-    }
-}
-
-fun testStatPalConnection(
-    key: String,
-    onResult: (String) -> Unit
-) {
-    Thread {
-        var result: String
-
-        try {
-            val encodedKey = URLEncoder.encode(
-                key,
-                "UTF-8"
-            )
-
-            val url = URL(
-                "https://statpal.io/api/v2/soccer/matches/live" +
-                    "?access_key=$encodedKey"
-            )
-
-            val connection = url.openConnection()
-                as HttpURLConnection
-
-            connection.requestMethod = "GET"
-            connection.connectTimeout = 15000
-            connection.readTimeout = 15000
-
-            val responseCode = connection.responseCode
-
-            result = when (responseCode) {
-                200 -> "Sikeres kapcsolat! A StatPal API válaszolt."
-                401, 403 -> "Hibás API-kulcs vagy nincs hozzáférés."
-                429 -> "Elérted az API lekérési korlátját."
-                else -> "API válasz: HTTP $responseCode"
-            }
-
-            connection.disconnect()
-
-        } catch (e: Exception) {
-            result = "Kapcsolódási hiba: ${e.message ?: "Ismeretlen hiba"}"
-        }
-
-        android.os.Handler(
-            android.os.Looper.getMainLooper()
-        ).post {
-            onResult(result)
-        }
-    }.start()
-}
-
-@Composable
-fun MatchCard(
-    league: String,
-    homeTeam: String,
-    awayTeam: String,
-    homeScore: String,
-    awayScore: String,
-    matchTime: String
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = CardColor
-        ),
-        shape = RoundedCornerShape(18.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = league,
-                    color = SecondaryColor,
-                    fontSize = 12.sp
-                )
-
-                Text(
-                    text = matchTime,
-                    color = AccentColor,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text(
-                        text = homeTeam,
-                        color = Color.White,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Text(
-                        text = awayTeam,
-                        color = Color.White,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                Column(
-                    horizontalAlignment = Alignment.End
-                ) {
-                    Text(
-                        text = homeScore,
-                        color = AccentColor,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    Text(
-                        text = awayScore,
-                        color = AccentColor,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
         }
     }
 }
