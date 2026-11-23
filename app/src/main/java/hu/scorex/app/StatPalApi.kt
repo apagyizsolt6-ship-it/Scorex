@@ -112,7 +112,10 @@ object StatPalApi {
         return localDateTime.format(outTimeFormatter) to localDateTime.toLocalDate().format(outDateFormatter)
     }
 
-    fun fetchLiveMatches(apiKey: String): List<ScorexMatch> {
+    fun fetchLiveMatches(
+        apiKey: String,
+        offset: Int = 0
+    ): List<ScorexMatch> {
 
         require(apiKey.isNotBlank()) {
             "Hiányzik a StatPal API-kulcs!"
@@ -124,7 +127,7 @@ object StatPalApi {
         )
 
         val url = URL(
-            "$BASE_URL?offset=0&access_key=$encodedKey"
+            "$BASE_URL?offset=$offset&access_key=$encodedKey"
         )
 
         val connection =
