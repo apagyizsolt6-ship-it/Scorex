@@ -107,6 +107,7 @@ fun ScorexApp(preferences: SharedPreferences) {
                 selectedMatch != null -> {
                     MatchDetailScreen(
                         match = selectedMatch!!,
+                        preferences = preferences,
                         savedTips = savedTips,
                         onToggleTip = ::toggleTip,
                         onBack = { selectedMatch = null }
@@ -140,6 +141,12 @@ fun ScorexApp(preferences: SharedPreferences) {
                         },
                         onClearTips = {
                             savedTips.clear()
+                            persistTips()
+                        },
+                        onRemoveTipsByStatuses = { statuses ->
+                            savedTips.removeAll { tip ->
+                                evaluateTipStatus(tip, emptyList()).first in statuses
+                            }
                             persistTips()
                         },
                         onSelectMatch = { match ->
@@ -218,6 +225,7 @@ fun HomeScreen(
     savedTips: List<String>,
     onRemoveTip: (String) -> Unit,
     onClearTips: () -> Unit,
+    onRemoveTipsByStatuses: (Set<String>) -> Unit,
     onSelectMatch: (ScorexMatch) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenApiData: () -> Unit
@@ -262,6 +270,20 @@ fun HomeScreen(
 
     val liveMatchesCount = remember(matches) {
         matches.count { isMatchLive(it) }
+    }
+
+    val tipStatuses = remember(savedTips.toList(), matches) {
+        savedTips.map { tip -> tip to evaluateTipStatus(tip, matches) }
+    }
+
+    val winningOrHitCount = remember(tipStatuses) {
+        tipStatuses.count { (_, st) -> st.first == "Nyerésre áll" || st.first == "Találat" }
+    }
+
+    val settledCount = remember(tipStatuses) {
+        tipStatuses.count { (_, st) ->
+            st.first == "Találat" || st.first == "Nem jött be" || st.first == "Lezárult"
+        }
     }
 
     LaunchedEffect(apiKey, dayOffset, refreshTrigger) {
@@ -658,18 +680,46 @@ fun HomeScreen(
                         fontWeight = FontWeight.Bold
                     )
 
-                    if (savedTips.isNotEmpty()) {
-                        Text(
-                            text = "ÖSSZES TÖRLÉSE",
-                            color = ErrorColor,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable { onClearTips() }
-                                .padding(horizontal = 6.dp, vertical = 4.dp)
-                        )
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        if (settledCount > 0) {
+                            Text(
+                                text = "LEZÁRTAK TÖRLÉSE",
+                                color = WarningColor,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        onRemoveTipsByStatuses(
+                                            setOf("Találat", "Nem jött be", "Lezárult")
+                                        )
+                                    }
+                                    .padding(horizontal = 6.dp, vertical = 4.dp)
+                            )
+                        }
+
+                        if (savedTips.isNotEmpty()) {
+                            Text(
+                                text = "ÖSSZES TÖRLÉSE",
+                                color = ErrorColor,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { onClearTips() }
+                                    .padding(horizontal = 6.dp, vertical = 4.dp)
+                            )
+                        }
                     }
+                }
+
+                if (savedTips.isNotEmpty()) {
+                    Text(
+                        text = "Jó állás / találat: $winningOrHitCount / ${savedTips.size} • Lezárt: $settledCount",
+                        color = CyanAccent,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
 
                 Text(
@@ -682,8 +732,8 @@ fun HomeScreen(
                     fontSize = 13.sp
                 )
 
-                savedTips.forEach { tip ->
-                    val (statusLabel, statusBadgeColor) = evaluateTipStatus(tip, matches)
+                tipStatuses.forEach { (tip, statusPair) ->
+                    val (statusLabel, statusBadgeColor) = statusPair
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -776,6 +826,7 @@ private fun SummaryStatPill(
 @Composable
 fun MatchDetailScreen(
     match: ScorexMatch,
+    preferences: SharedPreferences,
     savedTips: List<String>,
     onToggleTip: (String) -> Unit,
     onBack: () -> Unit
@@ -783,6 +834,13 @@ fun MatchDetailScreen(
     val live = isMatchLive(match)
     val finished = isMatchFinished(match)
     val translatedLeague = translateLeagueName(match.league)
+    val leagueKey = match.league.ifBlank { "Ismeretlen bajnokság" }
+
+    var isLeagueFavorite by remember(leagueKey, preferences) {
+        mutableStateOf(
+            leagueKey in (preferences.getStringSet("favorite_leagues", emptySet()).orEmpty())
+        )
+    }
 
     val homeGoalsInt = match.homeScore.toIntOrNull()
     val awayGoalsInt = match.awayScore.toIntOrNull()
@@ -812,11 +870,38 @@ fun MatchDetailScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        OutlinedButton(onClick = onBack) {
-            Text(
-                text = "← VISSZA",
-                color = AccentColor
-            )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedButton(onClick = onBack) {
+                Text(
+                    text = "← VISSZA",
+                    color = AccentColor
+                )
+            }
+
+            OutlinedButton(
+                onClick = {
+                    val current = preferences.getStringSet("favorite_leagues", emptySet())
+                        .orEmpty()
+                        .toMutableSet()
+                    if (isLeagueFavorite) {
+                        current.remove(leagueKey)
+                    } else {
+                        current.add(leagueKey)
+                    }
+                    preferences.edit().putStringSet("favorite_leagues", current).apply()
+                    isLeagueFavorite = !isLeagueFavorite
+                }
+            ) {
+                Text(
+                    text = if (isLeagueFavorite) "★ Kedvenc liga" else "☆ Kedvencnek",
+                    color = GoldAccent,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
 
         Card(
