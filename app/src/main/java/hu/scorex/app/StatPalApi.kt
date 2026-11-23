@@ -31,21 +31,26 @@ object StatPalApi {
     var lastLeagueCount: Int = 0
         private set
 
+    // A feldolgozás során megtalált összes API-meccs.
+    @Volatile
+    var lastApiMatchCount: Int = 0
+        private set
+
+    // A Scorex által sikeresen feldolgozott meccsek.
+    @Volatile
+    var lastParsedMatchCount: Int = 0
+        private set
+
+    // A hibás vagy hiányos adatok miatt kihagyott meccsek.
+    @Volatile
+    var lastSkippedMatchCount: Int = 0
+        private set
+
+    // Kompatibilitás a korábbi kóddal.
     @Volatile
     var lastMatchCount: Int = 0
         private set
 
-    /**
-     * A mai nap összes mérkőzésének lekérése.
-     *
-     * offset=0:
-     * mai mérkőzések
-     *
-     * Tartalmazza:
-     * - kezdés előtti mérkőzések
-     * - élő mérkőzések
-     * - befejezett mérkőzések
-     */
     fun fetchLiveMatches(apiKey: String): List<ScorexMatch> {
 
         require(apiKey.isNotBlank()) {
@@ -125,15 +130,26 @@ object StatPalApi {
 
             val matches = mutableListOf<ScorexMatch>()
             val leagueIds = mutableSetOf<String>()
+            val seenMatchIds = mutableSetOf<String>()
+
+            val rawMatchCounter = intArrayOf(0)
 
             collectAllLeagues(
                 value = root,
                 output = matches,
-                leagueIds = leagueIds
+                leagueIds = leagueIds,
+                seenMatchIds = seenMatchIds,
+                rawMatchCounter = rawMatchCounter
             )
 
             lastLeagueCount = leagueIds.size
+            lastApiMatchCount = rawMatchCounter[0]
+            lastParsedMatchCount = matches.size
             lastMatchCount = matches.size
+
+            lastSkippedMatchCount =
+                (lastApiMatchCount - lastParsedMatchCount)
+                    .coerceAtLeast(0)
 
             return matches
 
@@ -144,15 +160,13 @@ object StatPalApi {
 
     /**
      * Végigjárja a teljes JSON-választ.
-     *
-     * Megkeresi a napi objektumot,
-     * azon belül a league tömböt,
-     * majd minden bajnokságot feldolgoz.
      */
     private fun collectAllLeagues(
         value: Any?,
         output: MutableList<ScorexMatch>,
-        leagueIds: MutableSet<String>
+        leagueIds: MutableSet<String>,
+        seenMatchIds: MutableSet<String>,
+        rawMatchCounter: IntArray
     ) {
 
         when (value) {
@@ -165,9 +179,11 @@ object StatPalApi {
                 if (leagueArray != null) {
 
                     parseLeagueArray(
-                        leagueArray,
-                        output,
-                        leagueIds
+                        leagues = leagueArray,
+                        output = output,
+                        leagueIds = leagueIds,
+                        seenMatchIds = seenMatchIds,
+                        rawMatchCounter = rawMatchCounter
                     )
 
                     return
@@ -184,9 +200,11 @@ object StatPalApi {
                         child is JSONArray
                     ) {
                         collectAllLeagues(
-                            child,
-                            output,
-                            leagueIds
+                            value = child,
+                            output = output,
+                            leagueIds = leagueIds,
+                            seenMatchIds = seenMatchIds,
+                            rawMatchCounter = rawMatchCounter
                         )
                     }
                 }
@@ -197,9 +215,11 @@ object StatPalApi {
                 for (i in 0 until value.length()) {
 
                     collectAllLeagues(
-                        value.opt(i),
-                        output,
-                        leagueIds
+                        value = value.opt(i),
+                        output = output,
+                        leagueIds = leagueIds,
+                        seenMatchIds = seenMatchIds,
+                        rawMatchCounter = rawMatchCounter
                     )
                 }
             }
@@ -207,12 +227,18 @@ object StatPalApi {
     }
 
     /**
-     * Az összes bajnokság feldolgozása.
+     * Bajnokságok feldolgozása.
+     *
+     * A match mező lehet:
+     * - JSONObject: egyetlen mérkőzés
+     * - JSONArray: több mérkőzés
      */
     private fun parseLeagueArray(
         leagues: JSONArray,
         output: MutableList<ScorexMatch>,
-        leagueIds: MutableSet<String>
+        leagueIds: MutableSet<String>,
+        seenMatchIds: MutableSet<String>,
+        rawMatchCounter: IntArray
     ) {
 
         for (i in 0 until leagues.length()) {
@@ -235,25 +261,46 @@ object StatPalApi {
 
             leagueIds.add(leagueId)
 
-            val matchArray =
-                leagueObject.optJSONArray("match")
-                    ?: continue
+            val matchValue =
+                leagueObject.opt("match")
 
-            parseMatches(
-                matchArray,
-                leagueName,
-                output
-            )
+            when (matchValue) {
+
+                is JSONObject -> {
+
+                    parseSingleMatch(
+                        matchObject = matchValue,
+                        leagueName = leagueName,
+                        index = 0,
+                        output = output,
+                        seenMatchIds = seenMatchIds,
+                        rawMatchCounter = rawMatchCounter
+                    )
+                }
+
+                is JSONArray -> {
+
+                    parseMatches(
+                        matchArray = matchValue,
+                        leagueName = leagueName,
+                        output = output,
+                        seenMatchIds = seenMatchIds,
+                        rawMatchCounter = rawMatchCounter
+                    )
+                }
+            }
         }
     }
 
     /**
-     * Egy bajnokság összes mérkőzésének feldolgozása.
+     * Tömbként érkező mérkőzések feldolgozása.
      */
     private fun parseMatches(
         matchArray: JSONArray,
         leagueName: String,
-        output: MutableList<ScorexMatch>
+        output: MutableList<ScorexMatch>,
+        seenMatchIds: MutableSet<String>,
+        rawMatchCounter: IntArray
     ) {
 
         for (i in 0 until matchArray.length()) {
@@ -261,108 +308,160 @@ object StatPalApi {
             val matchObject =
                 matchArray.optJSONObject(i) ?: continue
 
-            val homeObject =
-                matchObject.optJSONObject("home")
-
-            val awayObject =
-                matchObject.optJSONObject("away")
-
-            val homeTeam = homeObject
-                ?.optString("name")
-                .orEmpty()
-                .trim()
-
-            val awayTeam = awayObject
-                ?.optString("name")
-                .orEmpty()
-                .trim()
-
-            if (
-                homeTeam.isBlank() ||
-                awayTeam.isBlank()
-            ) {
-                continue
-            }
-
-            val date = matchObject
-                .optString("date")
-                .trim()
-
-            val kickoff = matchObject
-                .optString("time")
-                .trim()
-
-            val matchId = matchObject
-                .optString("main_id")
-                .ifBlank {
-                    matchObject.optString("fallback_id_1")
-                }
-                .ifBlank {
-                    matchObject.optString("fallback_id_2")
-                }
-                .ifBlank {
-                    matchObject.optString("fallback_id_3")
-                }
-                .ifBlank {
-                    "$leagueName-$homeTeam-$awayTeam-$date-$kickoff-$i"
-                }
-
-            val homeScore = homeObject
-                ?.optString("goals")
-                .orEmpty()
-                .ifBlank { "-" }
-
-            val awayScore = awayObject
-                ?.optString("goals")
-                .orEmpty()
-                .ifBlank { "-" }
-
-            val status = matchObject
-                .optString("status")
-                .trim()
-
-            val injuryMinute = matchObject
-                .optString("inj_minute")
-                .trim()
-
-            val matchTime = when {
-
-                // Hosszabbításban megadott perc.
-                injuryMinute.isNotBlank() ->
-                    injuryMinute
-
-                // Befejezett mérkőzés.
-                status.equals("FT", true) ->
-                    "FT"
-
-                // Félidő.
-                status.equals("HT", true) ->
-                    "HT"
-
-                // Élő mérkőzés státusza vagy perce.
-                status.isNotBlank() &&
-                    status !in listOf("NS", "TBD") ->
-                    status
-
-                // Még el nem kezdődött mérkőzés.
-                kickoff.isNotBlank() ->
-                    kickoff
-
-                else ->
-                    "ÉLŐ"
-            }
-
-            output.add(
-                ScorexMatch(
-                    id = matchId,
-                    league = leagueName,
-                    homeTeam = homeTeam,
-                    awayTeam = awayTeam,
-                    homeScore = homeScore,
-                    awayScore = awayScore,
-                    matchTime = matchTime
-                )
+            parseSingleMatch(
+                matchObject = matchObject,
+                leagueName = leagueName,
+                index = i,
+                output = output,
+                seenMatchIds = seenMatchIds,
+                rawMatchCounter = rawMatchCounter
             )
         }
+    }
+
+    /**
+     * Egyetlen mérkőzés feldolgozása.
+     */
+    private fun parseSingleMatch(
+        matchObject: JSONObject,
+        leagueName: String,
+        index: Int,
+        output: MutableList<ScorexMatch>,
+        seenMatchIds: MutableSet<String>,
+        rawMatchCounter: IntArray
+    ) {
+
+        rawMatchCounter[0]++
+
+        val homeObject =
+            matchObject.optJSONObject("home")
+
+        val awayObject =
+            matchObject.optJSONObject("away")
+
+        val homeTeam = homeObject
+            ?.optString("name")
+            .orEmpty()
+            .trim()
+
+        val awayTeam = awayObject
+            ?.optString("name")
+            .orEmpty()
+            .trim()
+
+        // Hiányos csapatadat esetén nem jelenítjük meg.
+        if (
+            homeTeam.isBlank() ||
+            awayTeam.isBlank()
+        ) {
+            return
+        }
+
+        val date = matchObject
+            .optString("date")
+            .trim()
+
+        val kickoff = matchObject
+            .optString("time")
+            .trim()
+
+        val matchId = matchObject
+            .optString("main_id")
+            .ifBlank {
+                matchObject.optString("fallback_id_1")
+            }
+            .ifBlank {
+                matchObject.optString("fallback_id_2")
+            }
+            .ifBlank {
+                matchObject.optString("fallback_id_3")
+            }
+            .ifBlank {
+                "$leagueName-$homeTeam-$awayTeam-$date-$kickoff"
+            }
+
+        // Duplikált mérkőzés kiszűrése.
+        if (!seenMatchIds.add(matchId)) {
+            return
+        }
+
+        val homeScore = homeObject
+            ?.optString("goals")
+            .orEmpty()
+            .trim()
+            .ifBlank { "-" }
+            .let {
+                if (it == "?") "-" else it
+            }
+
+        val awayScore = awayObject
+            ?.optString("goals")
+            .orEmpty()
+            .trim()
+            .ifBlank { "-" }
+            .let {
+                if (it == "?") "-" else it
+            }
+
+        val status = matchObject
+            .optString("status")
+            .trim()
+
+        val injuryMinute = matchObject
+            .optString("inj_minute")
+            .trim()
+
+        val matchTime = when {
+
+            status.equals("FT", true) ->
+                "FT"
+
+            status.equals("HT", true) ->
+                "HT"
+
+            injuryMinute.isNotBlank() &&
+                status.isNotBlank() &&
+                status.all { it.isDigit() } ->
+                "$status+$injuryMinute"
+
+            injuryMinute.isNotBlank() ->
+                injuryMinute
+
+            // Kezdés előtti meccs.
+            status.equals("NS", true) ||
+                status.equals("TBD", true) ->
+                kickoff.ifBlank { "Hamarosan" }
+
+            // A StatPal a kezdési időt is adhatja status mezőben.
+            status.matches(Regex("\\d{1,2}:\\d{2}")) ->
+                status
+
+            // Élő mérkőzés perce.
+            status.isNotBlank() &&
+                status.all { it.isDigit() } ->
+                "$status'"
+
+            // Egyéb státusz.
+            status.isNotBlank() ->
+                status
+
+            kickoff.isNotBlank() ->
+                kickoff
+
+            else ->
+                "ÉLŐ"
+        }
+
+        output.add(
+            ScorexMatch(
+                id = matchId,
+                league = leagueName,
+                homeTeam = homeTeam,
+                awayTeam = awayTeam,
+                homeScore = homeScore,
+                awayScore = awayScore,
+                matchTime = matchTime
+            )
+        )
     }
 }
