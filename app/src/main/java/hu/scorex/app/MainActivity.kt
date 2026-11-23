@@ -50,6 +50,7 @@ private val CardColor = Color(0xFF121C2D)
 private val AccentColor = Color(0xFF35E0A1)
 private val SecondaryColor = Color(0xFF8B9BB4)
 private val ErrorColor = Color(0xFFFF7777)
+private val WarningColor = Color(0xFFFFB74D)
 
 @Composable
 fun ScorexApp(preferences: SharedPreferences) {
@@ -435,6 +436,16 @@ fun ApiDataScreen(
 
     val rawResponse = StatPalApi.lastRawResponse
 
+    val leagueCount = StatPalApi.lastLeagueCount
+    val apiMatchCount = StatPalApi.lastApiMatchCount
+    val parsedMatchCount = StatPalApi.lastParsedMatchCount
+    val skippedMatchCount = StatPalApi.lastSkippedMatchCount
+
+    val duplicateMatchCount = StatPalApi.lastDuplicateMatchCount
+    val missingTeamCount = StatPalApi.lastMissingTeamCount
+    val invalidMatchCount = StatPalApi.lastInvalidMatchCount
+    val skippedDetails = StatPalApi.lastSkippedMatchDetails
+
     val context = androidx.compose.ui.platform.LocalContext.current
 
     Column(
@@ -464,25 +475,25 @@ fun ApiDataScreen(
         Spacer(modifier = Modifier.height(10.dp))
 
         Text(
-            text = "Itt látható a legutóbbi API-válasz. A bajnokságok és mérkőzések adatait ebből ellenőrizzük.",
+            text = "Itt ellenőrizhetjük, hogy az API hány mérkőzést küldött, és a Scorex mely adatokat dolgozta fel vagy hagyta ki.",
             color = SecondaryColor,
             fontSize = 13.sp
         )
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // FELDOLGOZÁSI ELLENŐRZÉS
+        // ÖSSZESÍTETT FELDOLGOZÁSI ELLENŐRZÉS
 
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
                 containerColor = CardColor
             ),
-            shape = RoundedCornerShape(14.dp)
+            shape = RoundedCornerShape(16.dp)
         ) {
 
             Column(
-                modifier = Modifier.padding(14.dp)
+                modifier = Modifier.padding(16.dp)
             ) {
 
                 Text(
@@ -492,42 +503,100 @@ fun ApiDataScreen(
                     fontWeight = FontWeight.Bold
                 )
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-                Text(
-                    text = "Bajnokságok: ${StatPalApi.lastLeagueCount}",
-                    color = Color.White,
-                    fontSize = 13.sp
+                DiagnosticRow(
+                    label = "Bajnokságok",
+                    value = leagueCount.toString()
                 )
 
-                Spacer(modifier = Modifier.height(5.dp))
-
-                Text(
-                    text = "API-meccsek: ${StatPalApi.lastApiMatchCount}",
-                    color = Color.White,
-                    fontSize = 13.sp
+                DiagnosticRow(
+                    label = "API által küldött meccsek",
+                    value = apiMatchCount.toString()
                 )
 
-                Spacer(modifier = Modifier.height(5.dp))
-
-                Text(
-                    text = "Feldolgozott meccsek: ${StatPalApi.lastParsedMatchCount}",
-                    color = AccentColor,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold
+                DiagnosticRow(
+                    label = "Feldolgozott meccsek",
+                    value = parsedMatchCount.toString(),
+                    valueColor = AccentColor
                 )
 
-                Spacer(modifier = Modifier.height(5.dp))
+                HorizontalDivider(
+                    color = SecondaryColor.copy(alpha = 0.3f),
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
 
-                Text(
-                    text = "Kihagyott / duplikált: ${StatPalApi.lastSkippedMatchCount}",
-                    color = Color(0xFFFFB74D),
-                    fontSize = 13.sp
+                DiagnosticRow(
+                    label = "Összes kihagyott",
+                    value = skippedMatchCount.toString(),
+                    valueColor = WarningColor
+                )
+
+                DiagnosticRow(
+                    label = "Duplikált mérkőzések",
+                    value = duplicateMatchCount.toString(),
+                    valueColor = WarningColor
+                )
+
+                DiagnosticRow(
+                    label = "Hiányzó csapatnév",
+                    value = missingTeamCount.toString(),
+                    valueColor = WarningColor
+                )
+
+                DiagnosticRow(
+                    label = "Hibás mérkőzésadat",
+                    value = invalidMatchCount.toString(),
+                    valueColor = ErrorColor
                 )
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+
+        // RÉSZLETES KIHAGYÁSI LISTA
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = CardColor
+            ),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+
+            Column(
+                modifier = Modifier.padding(16.dp)
+            ) {
+
+                Text(
+                    text = "KIHAGYOTT MÉRKŐZÉSEK RÉSZLETEI",
+                    color = WarningColor,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Text(
+                    text = if (skippedDetails.isBlank()) {
+                        "Nincs részletes kihagyási adat. A mérkőzések feldolgozása sikeres lehetett."
+                    } else {
+                        skippedDetails
+                    },
+                    color = if (skippedDetails.isBlank()) {
+                        SecondaryColor
+                    } else {
+                        Color.White
+                    },
+                    fontSize = 11.sp,
+                    lineHeight = 17.sp
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // NYERS API-VÁLASZ
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -632,6 +701,37 @@ fun ApiDataScreen(
         ) {
             Text("VISSZA A SCOREXHEZ")
         }
+    }
+}
+
+@Composable
+private fun DiagnosticRow(
+    label: String,
+    value: String,
+    valueColor: Color = Color.White
+) {
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 5.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+
+        Text(
+            text = label,
+            color = SecondaryColor,
+            fontSize = 12.sp,
+            modifier = Modifier.weight(1f)
+        )
+
+        Text(
+            text = value,
+            color = valueColor,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
 
