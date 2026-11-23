@@ -190,7 +190,11 @@ private fun evaluateTipStatus(
     val finished = isMatchFinished(match)
 
     if (hScore == null || aScore == null) {
-        return if (finished) "Lezárult" else match.matchTime to CyanAccent
+        return if (finished) {
+            "Lezárult" to SecondaryColor
+        } else {
+            match.matchTime to CyanAccent
+        }
     }
 
     val outcome = when {
@@ -378,7 +382,6 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Kompakt összefoglaló sáv
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -405,7 +408,6 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Nap / offset léptető sáv
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1642,7 +1644,7 @@ fun ApiSettingsScreen(
                                 val result = withContext(Dispatchers.IO) {
                                     try {
                                         val resultMatches =
-                                            StatPalApi.fetchLiveMatches(key, dayOffset)
+                                            StatPalApi.fetchLiveMatches(key)
 
                                         "Sikeres kapcsolat! Mérkőzések: ${resultMatches.size}."
 
