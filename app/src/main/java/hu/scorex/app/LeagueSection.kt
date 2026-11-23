@@ -39,6 +39,24 @@ private val AccentPalette = listOf(
     Color(0xFF2DD4BF)
 )
 
+private enum class LeagueFilter(val label: String) {
+    ALL("Mind"),
+    FAVORITES("Kedvencek"),
+    LIVE("Élő")
+}
+
+fun isMatchLive(match: ScorexMatch): Boolean {
+    val finished = match.matchTime.equals("FT", ignoreCase = true) ||
+        match.rawStatus.equals("FT", ignoreCase = true)
+    if (finished) return false
+    return match.matchTime.equals("ÉLŐ", ignoreCase = true) ||
+        match.matchTime.equals("HT", ignoreCase = true) ||
+        match.rawStatus.equals("HT", ignoreCase = true) ||
+        match.rawStatus.equals("LIVE", ignoreCase = true) ||
+        match.matchTime.contains("'") ||
+        match.matchTime.contains("+")
+}
+
 private fun accentColorForLeague(
     league: String,
     translatedName: String,
@@ -55,7 +73,8 @@ private fun accentColorForLeague(
 @Composable
 fun LeagueSection(
     matches: List<ScorexMatch>,
-    preferences: SharedPreferences
+    preferences: SharedPreferences,
+    onSelectMatch: (ScorexMatch) -> Unit = {}
 ) {
     val favorites = remember {
         mutableStateListOf<String>().apply {
@@ -72,14 +91,48 @@ fun LeagueSection(
         mutableStateMapOf<String, Boolean>()
     }
 
+    var searchQuery by remember {
+        mutableStateOf("")
+    }
+
+    var activeFilter by remember {
+        mutableStateOf(LeagueFilter.ALL)
+    }
+
     val hungarianCollator = remember {
         Collator.getInstance(Locale("hu", "HU")).apply {
             strength = Collator.PRIMARY
         }
     }
 
-    val groupedMatches = matches.groupBy {
-        it.league.ifBlank { "Ismeretlen bajnokság" }
+    val filteredMatches = remember(matches, searchQuery, activeFilter, favorites.toList()) {
+        val q = searchQuery.trim().lowercase(Locale("hu", "HU"))
+        matches.filter { match ->
+            val leagueKey = match.league.ifBlank { "Ismeretlen bajnokság" }
+            val translatedLeague = translateLeagueName(leagueKey).lowercase(Locale("hu", "HU"))
+
+            val matchesFilter = when (activeFilter) {
+                LeagueFilter.ALL -> true
+                LeagueFilter.FAVORITES -> leagueKey in favorites
+                LeagueFilter.LIVE -> isMatchLive(match)
+            }
+
+            val matchesSearch = q.isEmpty() ||
+                leagueKey.lowercase(Locale("hu", "HU")).contains(q) ||
+                translatedLeague.contains(q) ||
+                match.homeTeam.lowercase(Locale("hu", "HU")).contains(q) ||
+                match.awayTeam.lowercase(Locale("hu", "HU")).contains(q)
+
+            matchesFilter && matchesSearch
+        }
+    }
+
+    val groupedMatches = remember(filteredMatches) {
+        filteredMatches
+            .groupBy { it.league.ifBlank { "Ismeretlen bajnokság" } }
+            .mapValues { (_, leagueList) ->
+                leagueList.sortedByDescending { isMatchLive(it) }
+            }
     }
 
     val sortedEntries = remember(groupedMatches, favorites.toList(), hungarianCollator) {
@@ -96,13 +149,125 @@ fun LeagueSection(
         }
     }
 
-    val allExpanded = sortedEntries.all { entry ->
+    val allExpanded = sortedEntries.isNotEmpty() && sortedEntries.all { entry ->
         expandedStates[entry.key] ?: true
     }
 
     Column(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+
+        // Keresés és gyors szűrők
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(
+                    width = 1.dp,
+                    color = LeagueCyan.copy(alpha = 0.22f),
+                    shape = RoundedCornerShape(15.dp)
+                ),
+            shape = RoundedCornerShape(15.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = LeagueBackground
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    placeholder = {
+                        Text(
+                            text = "Keresés csapatra vagy bajnokságra...",
+                            color = LeagueText,
+                            fontSize = 12.sp
+                        )
+                    },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            Text(
+                                text = "✕",
+                                color = LeagueCyan,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clickable { searchQuery = "" }
+                                    .padding(horizontal = 8.dp)
+                            )
+                        }
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = LeagueCyan,
+                        unfocusedBorderColor = Color(0xFF283B57),
+                        cursorColor = LeagueCyan
+                    )
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    LeagueFilter.entries.forEach { filter ->
+                        val selected = activeFilter == filter
+                        val chipColor = when (filter) {
+                            LeagueFilter.ALL -> LeagueCyan
+                            LeagueFilter.FAVORITES -> LeagueGold
+                            LeagueFilter.LIVE -> LeagueGreen
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    if (selected) chipColor.copy(alpha = 0.22f)
+                                    else Color(0xFF101A2B)
+                                )
+                                .border(
+                                    width = 1.dp,
+                                    color = if (selected) chipColor else Color(0xFF253752),
+                                    shape = RoundedCornerShape(10.dp)
+                                )
+                                .clickable { activeFilter = filter }
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = filter.label,
+                                color = if (selected) chipColor else LeagueText,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        if (sortedEntries.isEmpty()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(15.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = LeagueBackground
+                )
+            ) {
+                Text(
+                    text = "Nincs találat a megadott szűrőkre vagy keresésre.",
+                    color = LeagueText,
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(18.dp)
+                )
+            }
+            return@Column
+        }
 
         // Összes bajnokság nyitása és csukása
         Card(
@@ -157,7 +322,7 @@ fun LeagueSection(
                     modifier = Modifier.weight(1f)
                 ) {
                     Text(
-                        text = "Összes bajnokság",
+                        text = "Összes bajnokság (${sortedEntries.size})",
                         color = Color.White,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold
@@ -189,6 +354,7 @@ fun LeagueSection(
             val isFavorite = league in favorites
             val translatedLeague = translateLeagueName(league)
             val accent = accentColorForLeague(league, translatedLeague, isFavorite)
+            val liveCount = leagueMatches.count { isMatchLive(it) }
 
             Card(
                 modifier = Modifier
@@ -234,7 +400,7 @@ fun LeagueSection(
                         Box(
                             modifier = Modifier
                                 .width(5.dp)
-                                .height(62.dp)
+                                .height(64.dp)
                                 .background(accent)
                         )
 
@@ -285,6 +451,22 @@ fun LeagueSection(
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.SemiBold
                                     )
+                                }
+
+                                if (liveCount > 0) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(50))
+                                            .background(LeagueGreen.copy(alpha = 0.2f))
+                                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = "$liveCount ÉLŐ",
+                                            color = LeagueGreen,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
                                 }
 
                                 if (isFavorite) {
@@ -348,7 +530,10 @@ fun LeagueSection(
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             leagueMatches.forEach { match ->
-                                LiveMatchCard(match)
+                                LiveMatchCard(
+                                    match = match,
+                                    onClick = { onSelectMatch(match) }
+                                )
                             }
                         }
                     }
@@ -358,7 +543,7 @@ fun LeagueSection(
     }
 }
 
-private fun translateLeagueName(original: String): String {
+fun translateLeagueName(original: String): String {
 
     val countryTranslations = mapOf(
         "africa" to "Afrika",
@@ -508,7 +693,12 @@ private fun translateCompetitionWords(original: String): String {
         "Premier League" to "Premier League",
         "Champions League" to "Bajnokok Ligája",
         "Europa League" to "Európa-liga",
-        "Conference League" to "Konferencia-liga"
+        "Conference League" to "Konferencia-liga",
+        "Group Stage" to "Csoportkör",
+        "Round of 16" to "Nyolcaddöntő",
+        "Quarter-finals" to "Negyeddöntő",
+        "Semi-finals" to "Elődöntő",
+        "Final" to "Döntő"
     )
 
     var result = original
