@@ -46,7 +46,6 @@ object StatPalApi {
             connection.requestMethod = "GET"
             connection.connectTimeout = 15000
             connection.readTimeout = 15000
-
             connection.setRequestProperty(
                 "Accept",
                 "application/json"
@@ -55,16 +54,16 @@ object StatPalApi {
             val code = connection.responseCode
 
             val response = if (code in 200..299) {
-                connection.inputStream.bufferedReader().use {
-                    it.readText()
-                }
+                connection.inputStream
+                    .bufferedReader()
+                    .use { it.readText() }
             } else {
-                connection.errorStream?.bufferedReader()?.use {
-                    it.readText()
-                }.orEmpty()
+                connection.errorStream
+                    ?.bufferedReader()
+                    ?.use { it.readText() }
+                    .orEmpty()
             }
 
-            // A nyers válasz eltárolása a telefonos hibakereséshez.
             lastRawResponse = response
 
             if (code !in 200..299) {
@@ -84,20 +83,21 @@ object StatPalApi {
 
             val root = JSONTokener(response).nextValue()
 
-            if (root is JSONObject) {
-                if (!root.optBoolean("success", true)) {
-                    throw Exception(
-                        root.optString(
-                            "message",
-                            "A StatPal hibát jelzett."
-                        )
+            if (
+                root is JSONObject &&
+                !root.optBoolean("success", true)
+            ) {
+                throw Exception(
+                    root.optString(
+                        "message",
+                        "A StatPal hibát jelzett."
                     )
-                }
+                )
             }
 
             val matches = mutableListOf<ScorexMatch>()
 
-            collectMatches(root, matches)
+            collectLeagues(root, matches)
 
             return matches.distinctBy { it.id }
 
@@ -106,95 +106,49 @@ object StatPalApi {
         }
     }
 
-    private fun collectMatches(
+    /**
+     * A StatPal válaszának feldolgozása.
+     *
+     * A bajnokságok a league tömbben találhatók.
+     * A bajnokság neve: league.name
+     * A mérkőzések: league.match
+     */
+    private fun collectLeagues(
         value: Any?,
         output: MutableList<ScorexMatch>
     ) {
+
         when (value) {
 
             is JSONObject -> {
 
-                val home = getTeam(
-                    value,
-                    "home_team",
-                    "homeTeam",
-                    "home"
-                )
+                // Megkeressük a bajnokságokat tartalmazó tömböt.
+                val leagues = value.optJSONArray("league")
 
-                val away = getTeam(
-                    value,
-                    "away_team",
-                    "awayTeam",
-                    "away"
-                )
-
-                if (home.isNotBlank() && away.isNotBlank()) {
-
-                    output.add(
-                        ScorexMatch(
-                            id = getString(
-                                value,
-                                "id",
-                                "match_id",
-                                "fixture_id"
-                            ).ifBlank {
-                                "$home-$away"
-                            },
-
-                            league = getNestedString(
-                                value,
-                                "league",
-                                "competition",
-                                "tournament",
-                                "league_name"
-                            ).ifBlank {
-                                "Ismeretlen bajnokság"
-                            },
-
-                            homeTeam = home,
-                            awayTeam = away,
-
-                            homeScore = getScore(
-                                value,
-                                true
-                            ),
-
-                            awayScore = getScore(
-                                value,
-                                false
-                            ),
-
-                            matchTime = getString(
-                                value,
-                                "minute",
-                                "elapsed",
-                                "match_time",
-                                "status",
-                                "time"
-                            ).ifBlank {
-                                "ÉLŐ"
-                            }
-                        )
-                    )
+                if (leagues != null) {
+                    parseLeagueArray(leagues, output)
                 }
 
+                // A külső objektumokban tovább keresünk.
                 val iterator = value.keys()
 
                 while (iterator.hasNext()) {
-                    val child = value.opt(iterator.next())
+                    val key = iterator.next()
+                    val child = value.opt(key)
 
                     if (
                         child is JSONObject ||
                         child is JSONArray
                     ) {
-                        collectMatches(child, output)
+                        collectLeagues(child, output)
                     }
                 }
             }
 
             is JSONArray -> {
+
                 for (i in 0 until value.length()) {
-                    collectMatches(
+                    collectLeagues(
                         value.opt(i),
                         output
                     )
@@ -203,151 +157,118 @@ object StatPalApi {
         }
     }
 
-    private fun getTeam(
-        json: JSONObject,
-        vararg keys: String
-    ): String {
+    /**
+     * Egy bajnokságlista feldolgozása.
+     */
+    private fun parseLeagueArray(
+        leagues: JSONArray,
+        output: MutableList<ScorexMatch>
+    ) {
 
-        val value = getValue(json, *keys)
+        for (i in 0 until leagues.length()) {
 
-        return when (value) {
+            val leagueObject =
+                leagues.optJSONObject(i) ?: continue
 
-            is JSONObject -> getString(
-                value,
-                "name",
-                "team_name",
-                "display_name"
-            )
+            // A bajnokság neve a league objektumban van.
+            val leagueName = leagueObject
+                .optString("name")
+                .trim()
+                .ifBlank {
+                    "Ismeretlen bajnokság"
+                }
 
-            is String -> value
+            // Az adott bajnokság mérkőzései.
+            val matchArray =
+                leagueObject.optJSONArray("match")
+                    ?: continue
 
-            else -> ""
-        }
-    }
+            for (j in 0 until matchArray.length()) {
 
-    private fun getScore(
-        json: JSONObject,
-        home: Boolean
-    ): String {
+                val matchObject =
+                    matchArray.optJSONObject(j)
+                        ?: continue
 
-        val keys = if (home) {
-            arrayOf(
-                "home_score",
-                "homeScore",
-                "score_home",
-                "localteam_score"
-            )
-        } else {
-            arrayOf(
-                "away_score",
-                "awayScore",
-                "score_away",
-                "visitorteam_score"
-            )
-        }
+                val homeObject =
+                    matchObject.optJSONObject("home")
 
-        val value = getValue(json, *keys)
+                val awayObject =
+                    matchObject.optJSONObject("away")
 
-        if (value != null) {
-            return value.toString()
-        }
+                val homeTeam = homeObject
+                    ?.optString("name")
+                    .orEmpty()
+                    .trim()
 
-        val scores = getValue(
-            json,
-            "scores",
-            "score"
-        )
+                val awayTeam = awayObject
+                    ?.optString("name")
+                    .orEmpty()
+                    .trim()
 
-        if (scores is JSONObject) {
+                if (
+                    homeTeam.isBlank() ||
+                    awayTeam.isBlank()
+                ) {
+                    continue
+                }
 
-            val side = if (home) "home" else "away"
+                val matchId = matchObject
+                    .optString("main_id")
+                    .ifBlank {
+                        matchObject.optString("id")
+                    }
+                    .ifBlank {
+                        "$homeTeam-$awayTeam"
+                    }
 
-            val sideValue = getValue(
-                scores,
-                side
-            )
+                val homeScore = homeObject
+                    ?.optString("goals")
+                    .orEmpty()
+                    .ifBlank { "-" }
 
-            if (sideValue != null) {
-                return sideValue.toString()
-            }
-        }
+                val awayScore = awayObject
+                    ?.optString("goals")
+                    .orEmpty()
+                    .ifBlank { "-" }
 
-        return "–"
-    }
+                val status = matchObject
+                    .optString("status")
+                    .trim()
 
-    private fun getNestedString(
-        json: JSONObject,
-        vararg keys: String
-    ): String {
+                val injuryMinute = matchObject
+                    .optString("inj_minute")
+                    .trim()
 
-        val value = getValue(json, *keys)
+                val injuryTime = matchObject
+                    .optString("inj_time")
+                    .trim()
 
-        return when (value) {
+                val matchTime = when {
+                    injuryMinute.isNotBlank() ->
+                        injuryMinute
 
-            is JSONObject -> getString(
-                value,
-                "name",
-                "title",
-                "league_name"
-            )
+                    status.isNotBlank() ->
+                        status
 
-            is String -> value
+                    injuryTime.isNotBlank() ->
+                        injuryTime
 
-            else -> ""
-        }
-    }
+                    else ->
+                        "ÉLŐ"
+                }
 
-    private fun getString(
-        json: JSONObject,
-        vararg keys: String
-    ): String {
-
-        val value = getValue(json, *keys)
-
-        return when (value) {
-
-            null, JSONObject.NULL -> ""
-
-            is JSONObject -> getString(
-                value,
-                "name",
-                "value",
-                "title"
-            )
-
-            else -> value.toString()
-        }
-    }
-
-    private fun getValue(
-        json: JSONObject,
-        vararg keys: String
-    ): Any? {
-
-        for (key in keys) {
-            if (json.has(key) && !json.isNull(key)) {
-                return json.opt(key)
-            }
-        }
-
-        val iterator = json.keys()
-
-        while (iterator.hasNext()) {
-
-            val actualKey = iterator.next()
-
-            if (
-                keys.any {
-                    it.equals(
-                        actualKey,
-                        ignoreCase = true
+                output.add(
+                    ScorexMatch(
+                        id = matchId,
+                        league = leagueName,
+                        homeTeam = homeTeam,
+                        awayTeam = awayTeam,
+                        homeScore = homeScore,
+                        awayScore = awayScore,
+                        matchTime = matchTime
                     )
-                } && !json.isNull(actualKey)
-            ) {
-                return json.opt(actualKey)
+                )
             }
         }
-
-        return null
     }
 }
