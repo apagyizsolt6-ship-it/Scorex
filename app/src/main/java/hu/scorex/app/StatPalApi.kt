@@ -6,6 +6,12 @@ import org.json.JSONTokener
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.ZoneId
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 
 data class ScorexMatch(
     val id: String,
@@ -16,13 +22,18 @@ data class ScorexMatch(
     val awayScore: String,
     val matchTime: String,
     val date: String = "",
-    val rawStatus: String = ""
+    val rawStatus: String = "",
+    val rawKickoff: String = ""
 )
 
 object StatPalApi {
 
     private const val BASE_URL =
         "https://statpal.io/api/v2/soccer/matches/daily"
+
+    private val targetZone: ZoneId = ZoneId.of("Europe/Budapest")
+    private val outTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+    private val outDateFormatter: DateTimeFormatter = DateTimeFormatter.ISO_LOCAL_DATE
 
     @Volatile
     var lastRawResponse: String = ""
@@ -71,6 +82,35 @@ object StatPalApi {
         var invalidCount: Int = 0,
         val skippedDetails: MutableList<String> = mutableListOf()
     )
+
+    private fun convertUtcKickoffToLocal(
+        rawDate: String,
+        rawTime: String
+    ): Pair<String, String> {
+        val cleanedTime = rawTime.trim()
+        val matchResult = Regex("^(\\d{1,2}):(\\d{2})(?::(\\d{2}))?$").matchEntire(cleanedTime)
+            ?: return cleanedTime to rawDate.trim()
+
+        val hour = matchResult.groupValues[1].toIntOrNull() ?: return cleanedTime to rawDate.trim()
+        val minute = matchResult.groupValues[2].toIntOrNull() ?: return cleanedTime to rawDate.trim()
+        val second = matchResult.groupValues[3].toIntOrNull() ?: 0
+
+        if (hour !in 0..23 || minute !in 0..59 || second !in 0..59) {
+            return cleanedTime to rawDate.trim()
+        }
+
+        val parsedDate = runCatching {
+            if (rawDate.isNotBlank()) LocalDate.parse(rawDate.trim())
+            else LocalDate.now(ZoneOffset.UTC)
+        }.getOrElse {
+            LocalDate.now(ZoneOffset.UTC)
+        }
+
+        val utcDateTime = LocalDateTime.of(parsedDate, LocalTime.of(hour, minute, second))
+        val localDateTime = utcDateTime.atZone(ZoneOffset.UTC).withZoneSameInstant(targetZone)
+
+        return localDateTime.format(outTimeFormatter) to localDateTime.toLocalDate().format(outDateFormatter)
+    }
 
     fun fetchLiveMatches(apiKey: String): List<ScorexMatch> {
 
@@ -196,9 +236,6 @@ object StatPalApi {
         }
     }
 
-    /**
-     * Végigjárja a teljes JSON-választ.
-     */
     private fun collectAllLeagues(
         value: Any?,
         output: MutableList<ScorexMatch>,
@@ -264,13 +301,6 @@ object StatPalApi {
         }
     }
 
-    /**
-     * Bajnokságok feldolgozása.
-     *
-     * A match mező lehet:
-     * - JSONObject: egyetlen mérkőzés
-     * - JSONArray: több mérkőzés
-     */
     private fun parseLeagueArray(
         leagues: JSONArray,
         output: MutableList<ScorexMatch>,
@@ -330,9 +360,6 @@ object StatPalApi {
         }
     }
 
-    /**
-     * Tömbként érkező mérkőzések feldolgozása.
-     */
     private fun parseMatches(
         matchArray: JSONArray,
         leagueName: String,
@@ -373,9 +400,6 @@ object StatPalApi {
         }
     }
 
-    /**
-     * Egyetlen mérkőzés feldolgozása.
-     */
     private fun parseSingleMatch(
         matchObject: JSONObject,
         leagueName: String,
@@ -403,7 +427,7 @@ object StatPalApi {
             .orEmpty()
             .trim()
 
-        val date = matchObject
+        val rawDate = matchObject
             .optString("date")
             .trim()
 
@@ -432,7 +456,7 @@ object StatPalApi {
             .ifBlank { fallbackId2 }
             .ifBlank { fallbackId3 }
             .ifBlank {
-                "$leagueName-$homeTeam-$awayTeam-$date-$kickoff"
+                "$leagueName-$homeTeam-$awayTeam-$rawDate-$kickoff"
             }
 
         val description =
@@ -440,7 +464,7 @@ object StatPalApi {
             Bajnokság: $leagueName
             Hazai: ${homeTeam.ifBlank { "NINCS ADAT" }}
             Vendég: ${awayTeam.ifBlank { "NINCS ADAT" }}
-            Dátum: ${date.ifBlank { "NINCS ADAT" }}
+            Dátum: ${rawDate.ifBlank { "NINCS ADAT" }}
             Kezdés: ${kickoff.ifBlank { "NINCS ADAT" }}
             Azonosító: $matchId
             """.trimIndent()
@@ -507,6 +531,8 @@ object StatPalApi {
             .optString("inj_minute")
             .trim()
 
+        val (localKickoff, localDate) = convertUtcKickoffToLocal(rawDate, kickoff)
+
         val matchTime = when {
 
             status.equals("FT", true) ->
@@ -525,10 +551,10 @@ object StatPalApi {
 
             status.equals("NS", true) ||
                 status.equals("TBD", true) ->
-                kickoff.ifBlank { "Hamarosan" }
+                localKickoff.ifBlank { "Hamarosan" }
 
             status.matches(Regex("\\d{1,2}:\\d{2}")) ->
-                status
+                convertUtcKickoffToLocal(rawDate, status).first
 
             status.isNotBlank() &&
                 status.all { it.isDigit() } ->
@@ -537,8 +563,8 @@ object StatPalApi {
             status.isNotBlank() ->
                 status
 
-            kickoff.isNotBlank() ->
-                kickoff
+            localKickoff.isNotBlank() ->
+                localKickoff
 
             else ->
                 "ÉLŐ"
@@ -553,8 +579,9 @@ object StatPalApi {
                 homeScore = homeScore,
                 awayScore = awayScore,
                 matchTime = matchTime,
-                date = date,
-                rawStatus = status
+                date = localDate,
+                rawStatus = status,
+                rawKickoff = kickoff
             )
         )
     }
