@@ -31,25 +31,45 @@ object StatPalApi {
     var lastLeagueCount: Int = 0
         private set
 
-    // A feldolgozás során megtalált összes API-meccs.
     @Volatile
     var lastApiMatchCount: Int = 0
         private set
 
-    // A Scorex által sikeresen feldolgozott meccsek.
     @Volatile
     var lastParsedMatchCount: Int = 0
         private set
 
-    // A hibás vagy hiányos adatok miatt kihagyott meccsek.
     @Volatile
     var lastSkippedMatchCount: Int = 0
         private set
 
-    // Kompatibilitás a korábbi kóddal.
+    @Volatile
+    var lastDuplicateMatchCount: Int = 0
+        private set
+
+    @Volatile
+    var lastMissingTeamCount: Int = 0
+        private set
+
+    @Volatile
+    var lastInvalidMatchCount: Int = 0
+        private set
+
+    @Volatile
+    var lastSkippedMatchDetails: String = ""
+        private set
+
     @Volatile
     var lastMatchCount: Int = 0
         private set
+
+    private data class ParseStats(
+        var rawCount: Int = 0,
+        var duplicateCount: Int = 0,
+        var missingTeamCount: Int = 0,
+        var invalidCount: Int = 0,
+        val skippedDetails: MutableList<String> = mutableListOf()
+    )
 
     fun fetchLiveMatches(apiKey: String): List<ScorexMatch> {
 
@@ -131,25 +151,42 @@ object StatPalApi {
             val matches = mutableListOf<ScorexMatch>()
             val leagueIds = mutableSetOf<String>()
             val seenMatchIds = mutableSetOf<String>()
-
-            val rawMatchCounter = intArrayOf(0)
+            val stats = ParseStats()
 
             collectAllLeagues(
                 value = root,
                 output = matches,
                 leagueIds = leagueIds,
                 seenMatchIds = seenMatchIds,
-                rawMatchCounter = rawMatchCounter
+                stats = stats
             )
 
             lastLeagueCount = leagueIds.size
-            lastApiMatchCount = rawMatchCounter[0]
+            lastApiMatchCount = stats.rawCount
             lastParsedMatchCount = matches.size
             lastMatchCount = matches.size
 
+            lastDuplicateMatchCount =
+                stats.duplicateCount
+
+            lastMissingTeamCount =
+                stats.missingTeamCount
+
+            lastInvalidMatchCount =
+                stats.invalidCount
+
             lastSkippedMatchCount =
-                (lastApiMatchCount - lastParsedMatchCount)
+                (stats.rawCount - matches.size)
                     .coerceAtLeast(0)
+
+            lastSkippedMatchDetails =
+                if (stats.skippedDetails.isEmpty()) {
+                    "Nem találtunk kihagyott mérkőzést."
+                } else {
+                    stats.skippedDetails.joinToString(
+                        separator = "\n\n"
+                    )
+                }
 
             return matches
 
@@ -166,7 +203,7 @@ object StatPalApi {
         output: MutableList<ScorexMatch>,
         leagueIds: MutableSet<String>,
         seenMatchIds: MutableSet<String>,
-        rawMatchCounter: IntArray
+        stats: ParseStats
     ) {
 
         when (value) {
@@ -183,7 +220,7 @@ object StatPalApi {
                         output = output,
                         leagueIds = leagueIds,
                         seenMatchIds = seenMatchIds,
-                        rawMatchCounter = rawMatchCounter
+                        stats = stats
                     )
 
                     return
@@ -204,7 +241,7 @@ object StatPalApi {
                             output = output,
                             leagueIds = leagueIds,
                             seenMatchIds = seenMatchIds,
-                            rawMatchCounter = rawMatchCounter
+                            stats = stats
                         )
                     }
                 }
@@ -219,7 +256,7 @@ object StatPalApi {
                         output = output,
                         leagueIds = leagueIds,
                         seenMatchIds = seenMatchIds,
-                        rawMatchCounter = rawMatchCounter
+                        stats = stats
                     )
                 }
             }
@@ -238,7 +275,7 @@ object StatPalApi {
         output: MutableList<ScorexMatch>,
         leagueIds: MutableSet<String>,
         seenMatchIds: MutableSet<String>,
-        rawMatchCounter: IntArray
+        stats: ParseStats
     ) {
 
         for (i in 0 until leagues.length()) {
@@ -274,7 +311,7 @@ object StatPalApi {
                         index = 0,
                         output = output,
                         seenMatchIds = seenMatchIds,
-                        rawMatchCounter = rawMatchCounter
+                        stats = stats
                     )
                 }
 
@@ -285,7 +322,7 @@ object StatPalApi {
                         leagueName = leagueName,
                         output = output,
                         seenMatchIds = seenMatchIds,
-                        rawMatchCounter = rawMatchCounter
+                        stats = stats
                     )
                 }
             }
@@ -300,13 +337,29 @@ object StatPalApi {
         leagueName: String,
         output: MutableList<ScorexMatch>,
         seenMatchIds: MutableSet<String>,
-        rawMatchCounter: IntArray
+        stats: ParseStats
     ) {
 
         for (i in 0 until matchArray.length()) {
 
             val matchObject =
-                matchArray.optJSONObject(i) ?: continue
+                matchArray.optJSONObject(i)
+
+            if (matchObject == null) {
+
+                stats.rawCount++
+                stats.invalidCount++
+
+                stats.skippedDetails.add(
+                    """
+                    Bajnokság: $leagueName
+                    Mérkőzés sorszáma: ${i + 1}
+                    Ok: A mérkőzés adata nem JSON-objektum.
+                    """.trimIndent()
+                )
+
+                continue
+            }
 
             parseSingleMatch(
                 matchObject = matchObject,
@@ -314,7 +367,7 @@ object StatPalApi {
                 index = i,
                 output = output,
                 seenMatchIds = seenMatchIds,
-                rawMatchCounter = rawMatchCounter
+                stats = stats
             )
         }
     }
@@ -328,10 +381,10 @@ object StatPalApi {
         index: Int,
         output: MutableList<ScorexMatch>,
         seenMatchIds: MutableSet<String>,
-        rawMatchCounter: IntArray
+        stats: ParseStats
     ) {
 
-        rawMatchCounter[0]++
+        stats.rawCount++
 
         val homeObject =
             matchObject.optJSONObject("home")
@@ -349,14 +402,6 @@ object StatPalApi {
             .orEmpty()
             .trim()
 
-        // Hiányos csapatadat esetén nem jelenítjük meg.
-        if (
-            homeTeam.isBlank() ||
-            awayTeam.isBlank()
-        ) {
-            return
-        }
-
         val date = matchObject
             .optString("date")
             .trim()
@@ -365,23 +410,75 @@ object StatPalApi {
             .optString("time")
             .trim()
 
-        val matchId = matchObject
+        val mainId = matchObject
             .optString("main_id")
-            .ifBlank {
-                matchObject.optString("fallback_id_1")
-            }
-            .ifBlank {
-                matchObject.optString("fallback_id_2")
-            }
-            .ifBlank {
-                matchObject.optString("fallback_id_3")
-            }
+            .trim()
+
+        val fallbackId1 = matchObject
+            .optString("fallback_id_1")
+            .trim()
+
+        val fallbackId2 = matchObject
+            .optString("fallback_id_2")
+            .trim()
+
+        val fallbackId3 = matchObject
+            .optString("fallback_id_3")
+            .trim()
+
+        val matchId = mainId
+            .ifBlank { fallbackId1 }
+            .ifBlank { fallbackId2 }
+            .ifBlank { fallbackId3 }
             .ifBlank {
                 "$leagueName-$homeTeam-$awayTeam-$date-$kickoff"
             }
 
-        // Duplikált mérkőzés kiszűrése.
+        val description =
+            """
+            Bajnokság: $leagueName
+            Hazai: ${homeTeam.ifBlank { "NINCS ADAT" }}
+            Vendég: ${awayTeam.ifBlank { "NINCS ADAT" }}
+            Dátum: ${date.ifBlank { "NINCS ADAT" }}
+            Kezdés: ${kickoff.ifBlank { "NINCS ADAT" }}
+            Azonosító: $matchId
+            """.trimIndent()
+
+        // Hiányos csapatadat ellenőrzése.
+        if (
+            homeTeam.isBlank() ||
+            awayTeam.isBlank()
+        ) {
+
+            stats.missingTeamCount++
+
+            val reason = when {
+                homeTeam.isBlank() && awayTeam.isBlank() ->
+                    "Mindkét csapat neve hiányzik."
+
+                homeTeam.isBlank() ->
+                    "A hazai csapat neve hiányzik."
+
+                else ->
+                    "A vendégcsapat neve hiányzik."
+            }
+
+            stats.skippedDetails.add(
+                "$description\nOk: $reason"
+            )
+
+            return
+        }
+
+        // Duplikált mérkőzés ellenőrzése.
         if (!seenMatchIds.add(matchId)) {
+
+            stats.duplicateCount++
+
+            stats.skippedDetails.add(
+                "$description\nOk: Duplikált mérkőzésazonosító."
+            )
+
             return
         }
 
@@ -427,21 +524,17 @@ object StatPalApi {
             injuryMinute.isNotBlank() ->
                 injuryMinute
 
-            // Kezdés előtti meccs.
             status.equals("NS", true) ||
                 status.equals("TBD", true) ->
                 kickoff.ifBlank { "Hamarosan" }
 
-            // A StatPal a kezdési időt is adhatja status mezőben.
             status.matches(Regex("\\d{1,2}:\\d{2}")) ->
                 status
 
-            // Élő mérkőzés perce.
             status.isNotBlank() &&
                 status.all { it.isDigit() } ->
                 "$status'"
 
-            // Egyéb státusz.
             status.isNotBlank() ->
                 status
 
