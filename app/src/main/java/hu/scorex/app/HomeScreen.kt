@@ -112,12 +112,18 @@ internal fun HomeScreen(
         mutableIntStateOf(preferences.getInt("refresh_interval_sec", 15).coerceIn(15, 120))
     }
 
+    var favoriteTeams by remember {
+        mutableStateOf(preferences.getStringSet("favorite_teams", emptySet()).orEmpty().toSet())
+    }
+
     DisposableEffect(preferences) {
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
             when (key) {
                 "statpal_api_key" -> apiKey = prefs.getString("statpal_api_key", "").orEmpty()
                 "refresh_interval_sec" -> refreshIntervalSec =
                     prefs.getInt("refresh_interval_sec", 15).coerceIn(15, 120)
+                "favorite_teams" -> favoriteTeams =
+                    prefs.getStringSet("favorite_teams", emptySet()).orEmpty().toSet()
             }
         }
         preferences.registerOnSharedPreferenceChangeListener(listener)
@@ -130,6 +136,7 @@ internal fun HomeScreen(
     var autoRefresh by remember { mutableStateOf(true) }
     var tipFilter by remember { mutableStateOf(TipFilter.ALL) }
     var selectedQuickLeague by remember { mutableStateOf<String?>(null) }
+    var selectedQuickTeam by remember { mutableStateOf<String?>(null) }
 
     var matches by remember { mutableStateOf<List<ScorexMatch>>(emptyList()) }
     var isCachedData by remember { mutableStateOf(false) }
@@ -162,6 +169,9 @@ internal fun HomeScreen(
             TipFilter.ALL -> tipStatuses
             TipFilter.WINNING -> tipStatuses.filter { (_, st, _) ->
                 st.first == "Nyerésre áll" || st.first == "Találat"
+            }
+            TipFilter.PENDING -> tipStatuses.filter { (_, st, _) ->
+                st.first !in setOf("Nyerésre áll", "Találat", "Nem jött be", "Lezárult")
             }
             TipFilter.SETTLED -> tipStatuses.filter { (_, st, _) ->
                 st.first == "Találat" || st.first == "Nem jött be" || st.first == "Lezárult"
@@ -343,7 +353,7 @@ internal fun HomeScreen(
             )
             SummaryStatPill(
                 label = "KEDVENCEK",
-                value = favoriteCount.toString(),
+                value = (favoriteCount + favoriteTeams.size).toString(),
                 accent = GoldAccent,
                 modifier = Modifier.weight(1f)
             )
@@ -365,6 +375,7 @@ internal fun HomeScreen(
                 OutlinedButton(
                     onClick = {
                         selectedQuickLeague = null
+                        selectedQuickTeam = null
                         dayOffset--
                     },
                     enabled = !isLoading,
@@ -389,6 +400,7 @@ internal fun HomeScreen(
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.clickable {
                                 selectedQuickLeague = null
+                                selectedQuickTeam = null
                                 dayOffset = 0
                             }
                         )
@@ -398,6 +410,7 @@ internal fun HomeScreen(
                 OutlinedButton(
                     onClick = {
                         selectedQuickLeague = null
+                        selectedQuickTeam = null
                         dayOffset++
                     },
                     enabled = !isLoading,
@@ -563,6 +576,14 @@ internal fun HomeScreen(
                 onSelectLeague = { selectedQuickLeague = it }
             )
 
+            ScorexFavoritesTeamsQuickBar(
+                favoriteTeams = favoriteTeams,
+                matches = matches,
+                selectedTeam = selectedQuickTeam,
+                onSelectTeam = { selectedQuickTeam = it },
+                onOpenMatch = onSelectMatch
+            )
+
             Spacer(modifier = Modifier.height(10.dp))
 
             LeagueSection(
@@ -570,7 +591,9 @@ internal fun HomeScreen(
                 preferences = preferences,
                 savedTips = savedTips,
                 selectedLeagueKey = selectedQuickLeague,
+                selectedTeamKey = selectedQuickTeam,
                 onClearSelectedLeague = { selectedQuickLeague = null },
+                onClearSelectedTeam = { selectedQuickTeam = null },
                 onSelectMatch = onSelectMatch
             )
         }
@@ -816,6 +839,87 @@ internal fun HomeScreen(
             fontSize = 10.sp,
             textAlign = TextAlign.Center
         )
+    }
+}
+
+@Composable
+private fun ScorexFavoritesTeamsQuickBar(
+    favoriteTeams: Set<String>,
+    matches: List<ScorexMatch>,
+    selectedTeam: String?,
+    onSelectTeam: (String?) -> Unit,
+    onOpenMatch: (ScorexMatch) -> Unit
+) {
+    if (favoriteTeams.isEmpty()) return
+
+    val activeTeamMatches = remember(favoriteTeams, matches) {
+        favoriteTeams.sorted().mapNotNull { teamKey ->
+            val match = matches.firstOrNull {
+                favoriteTeamKey(it.homeTeam) == teamKey || favoriteTeamKey(it.awayTeam) == teamKey
+            }
+            teamKey to match
+        }
+    }
+
+    if (activeTeamMatches.isEmpty()) return
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(
+            text = "KEDVENC CSAPATOK",
+            color = AccentColor,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            activeTeamMatches.forEach { (teamKey, matched) ->
+                val isSelected = selectedTeam == teamKey
+                val label = matched?.let {
+                    val displayName = if (favoriteTeamKey(it.homeTeam) == teamKey) it.homeTeam else it.awayTeam
+                    "$displayName (${it.homeScore}:${it.awayScore} • ${it.matchTime})"
+                } ?: teamKey
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            if (isSelected) AccentColor.copy(alpha = 0.22f)
+                            else GlassWell
+                        )
+                        .border(
+                            width = 1.dp,
+                            color = if (isSelected) AccentColor else AccentColor.copy(alpha = 0.35f),
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                        .clickable {
+                            if (isSelected) {
+                                onSelectTeam(null)
+                            } else {
+                                onSelectTeam(teamKey)
+                                if (matched != null) onOpenMatch(matched)
+                            }
+                        }
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = "♥ $label",
+                        color = if (isSelected) AccentColor else Color.White,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
     }
 }
 
