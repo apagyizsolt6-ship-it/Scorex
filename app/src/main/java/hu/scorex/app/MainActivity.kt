@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import org.json.JSONObject
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
@@ -49,6 +50,11 @@ internal enum class TipFilter(val label: String) {
     WINNING("Jó állás"),
     SETTLED("Lezárt")
 }
+
+internal data class TipSnapshot(
+    val statusLabel: String,
+    val scorePreview: String?
+)
 
 @Composable
 internal fun GlassPanel(
@@ -87,20 +93,50 @@ internal fun normalizeTeamKey(name: String): String {
         .trim()
 }
 
+internal fun loadTipSnapshots(preferences: SharedPreferences): MutableMap<String, TipSnapshot> {
+    val raw = preferences.getString("scorex_tip_snapshots", "{}").orEmpty()
+    val result = mutableMapOf<String, TipSnapshot>()
+    runCatching {
+        val obj = JSONObject(raw)
+        val keys = obj.keys()
+        while (keys.hasNext()) {
+            val k = keys.next()
+            val item = obj.optJSONObject(k)
+            if (item != null) {
+                val label = item.optString("status", "")
+                val preview = item.optString("preview", "").ifBlank { null }
+                if (label.isNotBlank()) {
+                    result[k] = TipSnapshot(statusLabel = label, scorePreview = preview)
+                }
+            }
+        }
+    }
+    return result
+}
+
+internal fun saveTipSnapshots(
+    preferences: SharedPreferences,
+    snapshots: Map<String, TipSnapshot>
+) {
+    val root = JSONObject()
+    snapshots.forEach { (tip, snap) ->
+        root.put(
+            tip,
+            JSONObject().apply {
+                put("status", snap.statusLabel)
+                put("preview", snap.scorePreview.orEmpty())
+            }
+        )
+    }
+    preferences.edit().putString("scorex_tip_snapshots", root.toString()).apply()
+}
+
 @Composable
 fun ScorexApp(preferences: SharedPreferences) {
 
-    var showSettings by remember {
-        mutableStateOf(false)
-    }
-
-    var showApiData by remember {
-        mutableStateOf(false)
-    }
-
-    var selectedMatch by remember {
-        mutableStateOf<ScorexMatch?>(null)
-    }
+    var showSettings by remember { mutableStateOf(false) }
+    var showApiData by remember { mutableStateOf(false) }
+    var selectedMatch by remember { mutableStateOf<ScorexMatch?>(null) }
 
     val savedTips = remember {
         mutableStateListOf<String>().apply {
@@ -112,15 +148,25 @@ fun ScorexApp(preferences: SharedPreferences) {
         }
     }
 
+    val tipSnapshots = remember {
+        mutableStateMapOf<String, TipSnapshot>().apply {
+            putAll(loadTipSnapshots(preferences))
+        }
+    }
+
     fun persistTips() {
         preferences.edit()
             .putStringSet("scorex_tips", savedTips.toSet())
             .apply()
+        val activeKeys = savedTips.toSet()
+        tipSnapshots.keys.retainAll(activeKeys)
+        saveTipSnapshots(preferences, tipSnapshots)
     }
 
     fun toggleTip(tipLabel: String) {
         if (tipLabel in savedTips) {
             savedTips.remove(tipLabel)
+            tipSnapshots.remove(tipLabel)
         } else {
             savedTips.add(tipLabel)
         }
@@ -157,19 +203,13 @@ fun ScorexApp(preferences: SharedPreferences) {
                     }
 
                     showApiData -> {
-                        ApiDataScreen(
-                            onBack = {
-                                showApiData = false
-                            }
-                        )
+                        ApiDataScreen(onBack = { showApiData = false })
                     }
 
                     showSettings -> {
                         ApiSettingsScreen(
                             preferences = preferences,
-                            onBack = {
-                                showSettings = false
-                            }
+                            onBack = { showSettings = false }
                         )
                     }
 
@@ -177,30 +217,34 @@ fun ScorexApp(preferences: SharedPreferences) {
                         HomeScreen(
                             preferences = preferences,
                             savedTips = savedTips,
+                            tipSnapshots = tipSnapshots,
+                            onUpdateTipSnapshots = { updated ->
+                                tipSnapshots.clear()
+                                tipSnapshots.putAll(updated)
+                                saveTipSnapshots(preferences, tipSnapshots)
+                            },
                             onRemoveTip = { tip ->
                                 savedTips.remove(tip)
+                                tipSnapshots.remove(tip)
                                 persistTips()
                             },
                             onClearTips = {
                                 savedTips.clear()
+                                tipSnapshots.clear()
                                 persistTips()
                             },
                             onRemoveSettledTips = { activeMatches ->
                                 val settledStatuses = setOf("Találat", "Nem jött be", "Lezárult")
                                 savedTips.removeAll { tip ->
-                                    evaluateTipStatus(tip, activeMatches).first in settledStatuses
+                                    val liveEval = evaluateTipStatus(tip, activeMatches).first
+                                    val cachedEval = tipSnapshots[tip]?.statusLabel
+                                    (liveEval in settledStatuses) || (cachedEval in settledStatuses)
                                 }
                                 persistTips()
                             },
-                            onSelectMatch = { match ->
-                                selectedMatch = match
-                            },
-                            onOpenSettings = {
-                                showSettings = true
-                            },
-                            onOpenApiData = {
-                                showApiData = true
-                            }
+                            onSelectMatch = { match -> selectedMatch = match },
+                            onOpenSettings = { showSettings = true },
+                            onOpenApiData = { showApiData = true }
                         )
                     }
                 }
@@ -239,26 +283,34 @@ internal fun findMatchingMatch(
     }
 }
 
+internal fun statusColorForLabel(label: String): Color = when (label) {
+    "Találat", "Nyerésre áll" -> AccentColor
+    "Nem jött be" -> ErrorColor
+    "Jelenleg nem jó" -> WarningColor
+    "Lezárult", "Várakozik", "Mentve" -> SecondaryColor
+    else -> CyanAccent
+}
+
 internal fun evaluateTipStatus(
     tip: String,
-    matches: List<ScorexMatch>
+    matches: List<ScorexMatch>,
+    fallbackSnapshot: TipSnapshot? = null
 ): Pair<String, Color> {
     val colonIdx = tip.lastIndexOf(": ")
     if (colonIdx <= 0) return "Mentve" to SecondaryColor
 
     val pickPart = tip.substring(colonIdx + 2).trim()
-    val match = findMatchingMatch(tip, matches) ?: return "Várakozik" to SecondaryColor
+    val match = findMatchingMatch(tip, matches)
+        ?: fallbackSnapshot?.let { return it.statusLabel to statusColorForLabel(it.statusLabel) }
+        ?: return "Várakozik" to SecondaryColor
 
     val hScore = match.homeScore.toIntOrNull()
     val aScore = match.awayScore.toIntOrNull()
     val finished = isMatchFinished(match)
 
     if (hScore == null || aScore == null) {
-        return if (finished) {
-            "Lezárult" to SecondaryColor
-        } else {
-            match.matchTime to CyanAccent
-        }
+        val label = if (finished) "Lezárult" else match.matchTime
+        return label to statusColorForLabel(label)
     }
 
     val outcome = when {
@@ -268,10 +320,11 @@ internal fun evaluateTipStatus(
     }
 
     val isWinning = pickPart.startsWith(outcome)
-    return when {
-        finished && isWinning -> "Találat" to AccentColor
-        finished && !isWinning -> "Nem jött be" to ErrorColor
-        isWinning -> "Nyerésre áll" to AccentColor
-        else -> "Jelenleg nem jó" to WarningColor
+    val label = when {
+        finished && isWinning -> "Találat"
+        finished && !isWinning -> "Nem jött be"
+        isWinning -> "Nyerésre áll"
+        else -> "Jelenleg nem jó"
     }
+    return label to statusColorForLabel(label)
 }
