@@ -9,7 +9,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -34,6 +34,15 @@ fun ApiDataScreen(
     val missingTeamCount = StatPalApi.lastMissingTeamCount
     val invalidMatchCount = StatPalApi.lastInvalidMatchCount
     val skippedDetails = StatPalApi.lastSkippedMatchDetails
+
+    var showFullJson by remember { mutableStateOf(false) }
+    val previewLimit = 8000
+    val isTruncated = !showFullJson && rawResponse.length > previewLimit
+    val displayedResponse = if (isTruncated) {
+        rawResponse.take(previewLimit) + "\n\n... (előnézet: ${rawResponse.length} karakterből az első $previewLimit látszik)"
+    } else {
+        rawResponse
+    }
 
     val context = LocalContext.current
 
@@ -122,22 +131,37 @@ fun ApiDataScreen(
                 fontWeight = FontWeight.Bold
             )
 
-            FilledTonalButton(
-                onClick = {
-                    if (rawResponse.isNotBlank()) {
-                        val clipboard =
-                            context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        val clip = ClipData.newPlainText("Scorex StatPal API válasz", rawResponse)
-                        clipboard.setPrimaryClip(clip)
-                        Toast.makeText(context, "API-adatok vágólapra másolva!", Toast.LENGTH_SHORT).show()
-                    } else {
-                        Toast.makeText(context, "Nincs másolható API-adat.", Toast.LENGTH_SHORT).show()
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (rawResponse.length > previewLimit) {
+                    FilledTonalButton(
+                        onClick = { showFullJson = !showFullJson },
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text(
+                            text = if (showFullJson) "RÖVIDÍTETT" else "TELJES",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
-                },
-                enabled = rawResponse.isNotBlank(),
-                shape = RoundedCornerShape(10.dp)
-            ) {
-                Text(text = "⧉  MÁSOLÁS", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+
+                FilledTonalButton(
+                    onClick = {
+                        if (rawResponse.isNotBlank()) {
+                            val clipboard =
+                                context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            val clip = ClipData.newPlainText("Scorex StatPal API válasz", rawResponse)
+                            clipboard.setPrimaryClip(clip)
+                            Toast.makeText(context, "API-adatok vágólapra másolva!", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, "Nincs másolható API-adat.", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    enabled = rawResponse.isNotBlank(),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text(text = "⧉  MÁSOLÁS", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
             }
         }
 
@@ -147,7 +171,7 @@ fun ApiDataScreen(
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Text(
-                    text = if (rawResponse.isBlank()) "Még nincs eltárolt API-válasz." else rawResponse,
+                    text = if (rawResponse.isBlank()) "Még nincs eltárolt API-válasz." else displayedResponse,
                     color = Color.White,
                     fontSize = 11.sp,
                     lineHeight = 15.sp
