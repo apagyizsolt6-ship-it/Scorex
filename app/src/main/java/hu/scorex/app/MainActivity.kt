@@ -58,6 +58,12 @@ private val CyanAccent = Color(0xFF38BDF8)
 private val PurpleAccent = Color(0xFFA78BFA)
 private val GoldAccent = Color(0xFFFFC857)
 
+private enum class TipFilter(val label: String) {
+    ALL("Mind"),
+    WINNING("Jó állás"),
+    SETTLED("Lezárt")
+}
+
 @Composable
 fun ScorexApp(preferences: SharedPreferences) {
 
@@ -173,6 +179,25 @@ private fun formatOffsetLabel(offset: Int): String = when (offset) {
     else -> if (offset > 0) "+$offset nap" else "$offset nap"
 }
 
+private fun findMatchingMatch(
+    tip: String,
+    matches: List<ScorexMatch>
+): ScorexMatch? {
+    val colonIdx = tip.lastIndexOf(": ")
+    if (colonIdx <= 0) return null
+    val teamsPart = tip.substring(0, colonIdx)
+    val dashIdx = teamsPart.indexOf(" – ")
+    if (dashIdx <= 0) return null
+
+    val home = teamsPart.substring(0, dashIdx).trim()
+    val away = teamsPart.substring(dashIdx + 3).trim()
+
+    return matches.firstOrNull {
+        it.homeTeam.equals(home, ignoreCase = true) &&
+            it.awayTeam.equals(away, ignoreCase = true)
+    }
+}
+
 private fun evaluateTipStatus(
     tip: String,
     matches: List<ScorexMatch>
@@ -180,18 +205,8 @@ private fun evaluateTipStatus(
     val colonIdx = tip.lastIndexOf(": ")
     if (colonIdx <= 0) return "Mentve" to SecondaryColor
 
-    val teamsPart = tip.substring(0, colonIdx)
     val pickPart = tip.substring(colonIdx + 2).trim()
-    val dashIdx = teamsPart.indexOf(" – ")
-    if (dashIdx <= 0) return "Mentve" to SecondaryColor
-
-    val home = teamsPart.substring(0, dashIdx).trim()
-    val away = teamsPart.substring(dashIdx + 3).trim()
-
-    val match = matches.firstOrNull {
-        it.homeTeam.equals(home, ignoreCase = true) &&
-            it.awayTeam.equals(away, ignoreCase = true)
-    } ?: return "Várakozik" to SecondaryColor
+    val match = findMatchingMatch(tip, matches) ?: return "Várakozik" to SecondaryColor
 
     val hScore = match.homeScore.toIntOrNull()
     val aScore = match.awayScore.toIntOrNull()
@@ -241,12 +256,33 @@ fun HomeScreen(
         )
     }
 
+    var refreshIntervalSec by remember {
+        mutableIntStateOf(
+            preferences.getInt("refresh_interval_sec", 15).coerceIn(15, 120)
+        )
+    }
+
+    LaunchedEffect(preferences) {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
+            when (key) {
+                "statpal_api_key" -> apiKey = prefs.getString("statpal_api_key", "").orEmpty()
+                "refresh_interval_sec" -> refreshIntervalSec =
+                    prefs.getInt("refresh_interval_sec", 15).coerceIn(15, 120)
+            }
+        }
+        preferences.registerOnSharedPreferenceChangeListener(listener)
+    }
+
     var dayOffset by remember {
         mutableIntStateOf(0)
     }
 
     var autoRefresh by remember {
         mutableStateOf(true)
+    }
+
+    var tipFilter by remember {
+        mutableStateOf(TipFilter.ALL)
     }
 
     var matches by remember {
@@ -278,20 +314,36 @@ fun HomeScreen(
     }
 
     val tipStatuses = remember(savedTips.toList(), matches) {
-        savedTips.map { tip -> tip to evaluateTipStatus(tip, matches) }
+        savedTips.map { tip ->
+            val matched = findMatchingMatch(tip, matches)
+            val statusPair = evaluateTipStatus(tip, matches)
+            Triple(tip, statusPair, matched)
+        }
+    }
+
+    val filteredTipStatuses = remember(tipStatuses, tipFilter) {
+        when (tipFilter) {
+            TipFilter.ALL -> tipStatuses
+            TipFilter.WINNING -> tipStatuses.filter { (_, st, _) ->
+                st.first == "Nyerésre áll" || st.first == "Találat"
+            }
+            TipFilter.SETTLED -> tipStatuses.filter { (_, st, _) ->
+                st.first == "Találat" || st.first == "Nem jött be" || st.first == "Lezárult"
+            }
+        }
     }
 
     val winningOrHitCount = remember(tipStatuses) {
-        tipStatuses.count { (_, st) -> st.first == "Nyerésre áll" || st.first == "Találat" }
+        tipStatuses.count { (_, st, _) -> st.first == "Nyerésre áll" || st.first == "Találat" }
     }
 
     val settledCount = remember(tipStatuses) {
-        tipStatuses.count { (_, st) ->
+        tipStatuses.count { (_, st, _) ->
             st.first == "Találat" || st.first == "Nem jött be" || st.first == "Lezárult"
         }
     }
 
-    LaunchedEffect(apiKey, dayOffset, refreshTrigger, autoRefresh) {
+    LaunchedEffect(apiKey, dayOffset, refreshTrigger, autoRefresh, refreshIntervalSec) {
 
         if (apiKey.isBlank()) {
             matches = emptyList()
@@ -329,7 +381,7 @@ fun HomeScreen(
             }
 
             if (autoRefresh) {
-                delay(15_000L)
+                delay(refreshIntervalSec * 1_000L)
             }
         } while (autoRefresh)
     }
@@ -519,7 +571,7 @@ fun HomeScreen(
                         .padding(horizontal = 9.dp, vertical = 6.dp)
                 ) {
                     Text(
-                        text = if (autoRefresh) "AUTO: BE" else "AUTO: KI",
+                        text = if (autoRefresh) "AUTO (${refreshIntervalSec}s)" else "AUTO: KI",
                         color = if (autoRefresh) AccentColor else SecondaryColor,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold
@@ -749,6 +801,39 @@ fun HomeScreen(
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold
                     )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        TipFilter.entries.forEach { filter ->
+                            val selected = tipFilter == filter
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(9.dp))
+                                    .background(
+                                        if (selected) GoldAccent.copy(alpha = 0.2f)
+                                        else BackgroundColor.copy(alpha = 0.6f)
+                                    )
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (selected) GoldAccent else Color(0xFF283B57),
+                                        shape = RoundedCornerShape(9.dp)
+                                    )
+                                    .clickable { tipFilter = filter }
+                                    .padding(vertical = 6.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = filter.label,
+                                    color = if (selected) GoldAccent else SecondaryColor,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
                 }
 
                 Text(
@@ -761,24 +846,39 @@ fun HomeScreen(
                     fontSize = 13.sp
                 )
 
-                tipStatuses.forEach { (tip, statusPair) ->
+                filteredTipStatuses.forEach { (tip, statusPair, matched) ->
                     val (statusLabel, statusBadgeColor) = statusPair
+                    val scorePreview = matched?.let {
+                        "${it.homeScore}:${it.awayScore} • ${it.matchTime}"
+                    }
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
                             .background(BackgroundColor.copy(alpha = 0.65f))
+                            .clickable(enabled = matched != null) {
+                                if (matched != null) onSelectMatch(matched)
+                            }
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = tip,
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.weight(1f)
-                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = tip,
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            if (scorePreview != null) {
+                                Text(
+                                    text = "Állás: $scorePreview",
+                                    color = SecondaryColor,
+                                    fontSize = 10.sp
+                                )
+                            }
+                        }
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(50))
@@ -1615,6 +1715,12 @@ fun ApiSettingsScreen(
         )
     }
 
+    var selectedInterval by remember {
+        mutableIntStateOf(
+            preferences.getInt("refresh_interval_sec", 15).coerceIn(15, 120)
+        )
+    }
+
     var statusText by remember {
         mutableStateOf("Add meg a StatPal API-kulcsodat.")
     }
@@ -1624,6 +1730,7 @@ fun ApiSettingsScreen(
     }
 
     val scope = rememberCoroutineScope()
+    val intervalOptions = listOf(15, 30, 60)
 
     Column(
         modifier = Modifier
@@ -1704,6 +1811,56 @@ fun ApiSettingsScreen(
                     )
                 )
 
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = "Automatikus frissítési időköz",
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    intervalOptions.forEach { sec ->
+                        val active = selectedInterval == sec
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    if (active) AccentColor.copy(alpha = 0.20f)
+                                    else BackgroundColor
+                                )
+                                .border(
+                                    width = 1.dp,
+                                    color = if (active) AccentColor else Color(0xFF283B57),
+                                    shape = RoundedCornerShape(10.dp)
+                                )
+                                .clickable {
+                                    selectedInterval = sec
+                                    preferences.edit()
+                                        .putInt("refresh_interval_sec", sec)
+                                        .apply()
+                                    statusText = "Frissítési időköz: $sec mp."
+                                }
+                                .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "$sec mp",
+                                color = if (active) AccentColor else SecondaryColor,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(14.dp))
 
                 Button(
@@ -1724,9 +1881,13 @@ fun ApiSettingsScreen(
                                     "statpal_api_key",
                                     key
                                 )
+                                .putInt(
+                                    "refresh_interval_sec",
+                                    selectedInterval
+                                )
                                 .apply()
 
-                            statusText = "API-kulcs sikeresen elmentve."
+                            statusText = "Beállítások sikeresen elmentve."
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
