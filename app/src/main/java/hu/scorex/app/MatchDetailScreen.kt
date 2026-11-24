@@ -24,6 +24,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun MatchDetailScreen(
@@ -34,6 +37,15 @@ fun MatchDetailScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val apiKey = remember(preferences) {
+        preferences.getString("statpal_api_key", "").orEmpty()
+    }
+
+    var v2EndpointInput by remember { mutableStateOf("standings") }
+    var v2ResponseText by remember { mutableStateOf("") }
+    var isFetchingV2 by remember { mutableStateOf(false) }
+
     val live = isMatchLive(match)
     val finished = isMatchFinished(match)
     val translatedLeague = translateLeagueName(match.league)
@@ -313,6 +325,107 @@ fun MatchDetailScreen(
                     DiagnosticRow(label = "Dátum", value = match.date)
                 }
                 DiagnosticRow(label = "Azonosító", value = match.id)
+            }
+        }
+
+        GlassPanel(
+            borderColor = CyanAccent.copy(alpha = 0.30f),
+            gradientColors = listOf(GlassSurface, GlassWell)
+        ) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "STATPAL SOCCER V2 VÉGPONT LEKÉRDEZÉS",
+                    color = CyanAccent,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("standings", "matches/live").forEach { preset ->
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(
+                                    if (v2EndpointInput == preset) CyanAccent.copy(alpha = 0.22f)
+                                    else GlassSurface
+                                )
+                                .border(
+                                    width = 1.dp,
+                                    color = if (v2EndpointInput == preset) CyanAccent else Color.White.copy(alpha = 0.12f),
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+                                .clickable { v2EndpointInput = preset }
+                                .padding(horizontal = 9.dp, vertical = 5.dp)
+                        ) {
+                            Text(
+                                text = preset,
+                                color = if (v2EndpointInput == preset) CyanAccent else SecondaryColor,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = v2EndpointInput,
+                    onValueChange = { v2EndpointInput = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("v2 végpont (/api/v2/soccer/...)") },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = GlassSurface,
+                        unfocusedContainerColor = GlassSurface,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = CyanAccent,
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.15f)
+                    )
+                )
+
+                Button(
+                    onClick = {
+                        if (apiKey.isBlank()) {
+                            v2ResponseText = "Előbb állítsd be a StatPal API-kulcsot a Beállításokban."
+                        } else if (!isFetchingV2) {
+                            isFetchingV2 = true
+                            scope.launch {
+                                v2ResponseText = withContext(Dispatchers.IO) {
+                                    try {
+                                        StatPalApi.fetchSoccerV2Endpoint(
+                                            apiKey = apiKey,
+                                            relativePath = v2EndpointInput,
+                                            extraQuery = mapOf("match_id" to match.id)
+                                        ).take(4000)
+                                    } catch (e: Exception) {
+                                        e.message ?: "Hiba a v2 lekérdezés során."
+                                    }
+                                }
+                                isFetchingV2 = false
+                            }
+                        }
+                    },
+                    enabled = !isFetchingV2,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = CyanAccent,
+                        contentColor = BackgroundColor
+                    )
+                ) {
+                    Text(if (isFetchingV2) "LEKÉRDEZÉS..." else "V2 VÉGPONT LEKÉRÉSE")
+                }
+
+                if (v2ResponseText.isNotBlank()) {
+                    Text(
+                        text = v2ResponseText,
+                        color = Color.White,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp
+                    )
+                }
             }
         }
 
