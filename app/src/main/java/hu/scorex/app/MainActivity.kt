@@ -48,6 +48,7 @@ internal val GoldAccent = Color(0xFFFFC857)
 internal enum class TipFilter(val label: String) {
     ALL("Mind"),
     WINNING("Jó állás"),
+    PENDING("Várakozik"),
     SETTLED("Lezárt")
 }
 
@@ -91,6 +92,11 @@ internal fun normalizeTeamKey(name: String): String {
         .replace(Regex("[^a-z0-9áéíóöőúüű ]"), " ")
         .replace(Regex("\\s+"), " ")
         .trim()
+}
+
+internal fun favoriteTeamKey(name: String): String {
+    val normalized = normalizeTeamKey(name)
+    return normalized.ifBlank { name.trim() }
 }
 
 internal fun loadTipSnapshots(preferences: SharedPreferences): MutableMap<String, TipSnapshot> {
