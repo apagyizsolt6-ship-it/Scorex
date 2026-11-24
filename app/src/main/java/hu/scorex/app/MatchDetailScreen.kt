@@ -32,14 +32,46 @@ fun MatchDetailScreen(
     val translatedLeague = translateLeagueName(match.league)
     val leagueKey = match.league.ifBlank { "Ismeretlen bajnokság" }
 
+    val homeKey = favoriteTeamKey(match.homeTeam)
+    val awayKey = favoriteTeamKey(match.awayTeam)
+
     var isLeagueFavorite by remember(leagueKey, preferences) {
         mutableStateOf(
             leagueKey in (preferences.getStringSet("favorite_leagues", emptySet()).orEmpty())
         )
     }
 
+    var favoriteTeams by remember(preferences) {
+        mutableStateOf(
+            preferences.getStringSet("favorite_teams", emptySet()).orEmpty().toSet()
+        )
+    }
+
+    fun toggleTeamFavorite(teamName: String) {
+        val key = favoriteTeamKey(teamName)
+        if (key.isBlank()) return
+        val updated = favoriteTeams.toMutableSet()
+        if (key in updated) {
+            updated.remove(key)
+        } else {
+            updated.add(key)
+        }
+        preferences.edit().putStringSet("favorite_teams", updated).apply()
+        favoriteTeams = updated
+    }
+
     val homeGoalsInt = match.homeScore.toIntOrNull()
     val awayGoalsInt = match.awayScore.toIntOrNull()
+
+    val currentOutcomePrefix = if (homeGoalsInt != null && awayGoalsInt != null) {
+        when {
+            homeGoalsInt > awayGoalsInt -> "1 ("
+            awayGoalsInt > homeGoalsInt -> "2 ("
+            else -> "X ("
+        }
+    } else {
+        null
+    }
 
     val summaryText = when {
         homeGoalsInt != null && awayGoalsInt != null -> when {
@@ -174,6 +206,58 @@ fun MatchDetailScreen(
                     )
                 }
 
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val isHomeFav = homeKey in favoriteTeams
+                    val isAwayFav = awayKey in favoriteTeams
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(if (isHomeFav) GoldAccent.copy(alpha = 0.18f) else GlassWell)
+                            .border(
+                                width = 1.dp,
+                                color = if (isHomeFav) GoldAccent else Color.White.copy(alpha = 0.10f),
+                                shape = RoundedCornerShape(9.dp)
+                            )
+                            .clickable { toggleTeamFavorite(match.homeTeam) }
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (isHomeFav) "♥ Hazai kedvenc" else "♡ Hazai mentése",
+                            color = if (isHomeFav) GoldAccent else SecondaryColor,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(if (isAwayFav) GoldAccent.copy(alpha = 0.18f) else GlassWell)
+                            .border(
+                                width = 1.dp,
+                                color = if (isAwayFav) GoldAccent else Color.White.copy(alpha = 0.10f),
+                                shape = RoundedCornerShape(9.dp)
+                            )
+                            .clickable { toggleTeamFavorite(match.awayTeam) }
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (isAwayFav) "♥ Vendég kedvenc" else "♡ Vendég mentése",
+                            color = if (isAwayFav) GoldAccent else SecondaryColor,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
                 HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
 
                 Text(
@@ -232,6 +316,7 @@ fun MatchDetailScreen(
                 tipOptions.forEach { option ->
                     val fullTip = "${match.homeTeam} – ${match.awayTeam}: $option"
                     val isSaved = fullTip in savedTips
+                    val isCurrentWinner = currentOutcomePrefix != null && option.startsWith(currentOutcomePrefix)
 
                     Row(
                         modifier = Modifier
@@ -251,13 +336,22 @@ fun MatchDetailScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = option,
-                            color = if (isSaved) GoldAccent else Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.weight(1f)
-                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = option,
+                                color = if (isSaved) GoldAccent else Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            if (isCurrentWinner) {
+                                Text(
+                                    text = if (finished) "Eredmény alapján nyerő" else "Jelenleg nyerésre áll",
+                                    color = AccentColor,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
                         Text(
                             text = if (isSaved) "✓ Mentve" else "+ Felvétel",
                             color = if (isSaved) GoldAccent else AccentColor,
