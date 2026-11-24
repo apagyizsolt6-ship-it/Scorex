@@ -1,6 +1,11 @@
 package hu.scorex.app
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -27,6 +33,7 @@ fun MatchDetailScreen(
     onToggleTip: (String) -> Unit,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
     val live = isMatchLive(match)
     val finished = isMatchFinished(match)
     val translatedLeague = translateLeagueName(match.league)
@@ -73,15 +80,21 @@ fun MatchDetailScreen(
         null
     }
 
+    val extraNote = when {
+        match.matchTime.equals("AET", true) || match.rawStatus.equals("AET", true) -> " (hosszabbítás után)"
+        match.matchTime.equals("PEN", true) || match.rawStatus.equals("PEN", true) -> " (tizenegyesekkel)"
+        else -> ""
+    }
+
     val summaryText = when {
         homeGoalsInt != null && awayGoalsInt != null -> when {
-            homeGoalsInt > awayGoalsInt -> "${match.homeTeam} vezet / áll ${match.homeScore}–${match.awayScore} arányban."
-            awayGoalsInt > homeGoalsInt -> "${match.awayTeam} vezet / áll ${match.homeScore}–${match.awayScore} arányban."
-            else -> "Kiegyenlített állás: ${match.homeScore}–${match.awayScore}."
+            homeGoalsInt > awayGoalsInt -> "${match.homeTeam} vezet / áll ${match.homeScore}–${match.awayScore} arányban$extraNote."
+            awayGoalsInt > homeGoalsInt -> "${match.awayTeam} vezet / áll ${match.homeScore}–${match.awayScore} arányban$extraNote."
+            else -> "Kiegyenlített állás: ${match.homeScore}–${match.awayScore}$extraNote."
         }
-        finished -> "A mérkőzés véget ért (${match.homeScore} – ${match.awayScore})."
+        finished -> "A mérkőzés véget ért (${match.homeScore} – ${match.awayScore})$extraNote."
         live -> "A mérkőzés folyamatban van (${match.matchTime})."
-        else -> "Még nem kezdődött el vagy frissítésre vár (${match.matchTime})."
+        else -> "Állapot / kezdés: ${match.matchTime}."
     }
 
     val tipOptions = listOf(
@@ -89,6 +102,11 @@ fun MatchDetailScreen(
         "X (Döntetlen)",
         "2 (${match.awayTeam})"
     )
+
+    val matchSavedTips = remember(savedTips.toList(), match.homeTeam, match.awayTeam) {
+        val prefix = "${match.homeTeam} – ${match.awayTeam}: "
+        savedTips.filter { it.startsWith(prefix, ignoreCase = true) }
+    }
 
     Column(
         modifier = Modifier
@@ -306,12 +324,58 @@ fun MatchDetailScreen(
                 modifier = Modifier.padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    text = "TIPP HOZZÁADÁSA A SZELVÉNYHEZ",
-                    color = GoldAccent,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "TIPP HOZZÁADÁSA A SZELVÉNYHEZ",
+                        color = GoldAccent,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    if (matchSavedTips.isNotEmpty()) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "MÁSOL",
+                                color = CyanAccent,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .background(GlassWell)
+                                    .clickable {
+                                        val txt = matchSavedTips.joinToString("\n") { "• $it" }
+                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        clipboard.setPrimaryClip(ClipData.newPlainText("Scorex tipp", txt))
+                                        Toast.makeText(context, "Tipp másolva!", Toast.LENGTH_SHORT).show()
+                                    }
+                                    .padding(horizontal = 7.dp, vertical = 3.dp)
+                            )
+                            Text(
+                                text = "MEGOSZT",
+                                color = AccentColor,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .background(GlassWell)
+                                    .clickable {
+                                        val txt = matchSavedTips.joinToString("\n") { "• $it" }
+                                        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                            type = "text/plain"
+                                            putExtra(Intent.EXTRA_TEXT, txt)
+                                        }
+                                        context.startActivity(Intent.createChooser(sendIntent, "Tipp megosztása"))
+                                    }
+                                    .padding(horizontal = 7.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+                }
 
                 tipOptions.forEach { option ->
                     val fullTip = "${match.homeTeam} – ${match.awayTeam}: $option"
