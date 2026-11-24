@@ -28,8 +28,14 @@ data class ScorexMatch(
 
 object StatPalApi {
 
-    private const val BASE_URL =
-        "https://statpal.io/api/v2/soccer/matches/daily"
+    private const val V2_SOCCER_BASE =
+        "https://statpal.io/api/v2/soccer"
+
+    private const val DAILY_URL =
+        "$V2_SOCCER_BASE/matches/daily"
+
+    private const val LIVE_URL =
+        "$V2_SOCCER_BASE/matches/live"
 
     private const val USAGE_URL =
         "https://statpal.io/api/user-request-count"
@@ -40,6 +46,14 @@ object StatPalApi {
 
     @Volatile
     var lastRawResponse: String = ""
+        private set
+
+    @Volatile
+    var lastExtraEndpointPath: String = ""
+        private set
+
+    @Volatile
+    var lastExtraEndpointResponse: String = ""
         private set
 
     @Volatile
@@ -94,10 +108,25 @@ object StatPalApi {
         val skippedDetails: MutableList<String> = mutableListOf()
     )
 
+    private fun buildUrlWithKey(baseUrl: String, apiKey: String, extraQuery: Map<String, String> = emptyMap()): String {
+        val encodedKey = URLEncoder.encode(apiKey.trim(), "UTF-8")
+        val sb = StringBuilder(baseUrl)
+        sb.append(if (baseUrl.contains("?")) "&" else "?")
+        sb.append("access_key=").append(encodedKey)
+        extraQuery.forEach { (k, v) ->
+            if (k.isNotBlank() && v.isNotBlank()) {
+                sb.append("&")
+                    .append(URLEncoder.encode(k, "UTF-8"))
+                    .append("=")
+                    .append(URLEncoder.encode(v, "UTF-8"))
+            }
+        }
+        return sb.toString()
+    }
+
     fun fetchDailyRequestCount(apiKey: String): String {
         if (apiKey.isBlank()) return "-"
-        val encodedKey = URLEncoder.encode(apiKey.trim(), "UTF-8")
-        val url = URL("$USAGE_URL?access_key=$encodedKey")
+        val url = URL(buildUrlWithKey(USAGE_URL, apiKey))
         val connection = url.openConnection() as HttpURLConnection
         return try {
             connection.requestMethod = "GET"
@@ -124,6 +153,42 @@ object StatPalApi {
             }
         } catch (_: Exception) {
             lastDailyRequestCount
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    /**
+     * Általános StatPal Soccer v2 végpont-lekérdező (pl. "standings", "matches/live" vagy egyedi v2 útvonal).
+     */
+    fun fetchSoccerV2Endpoint(
+        apiKey: String,
+        relativePath: String,
+        extraQuery: Map<String, String> = emptyMap()
+    ): String {
+        require(apiKey.isNotBlank()) { "Hiányzik a StatPal API-kulcs!" }
+        val cleanPath = relativePath.trim().trimStart('/')
+        require(cleanPath.isNotBlank()) { "Adj meg egy v2 végpont útvonalat (pl. standings)." }
+
+        lastExtraEndpointPath = "/api/v2/soccer/$cleanPath"
+        val url = URL(buildUrlWithKey("$V2_SOCCER_BASE/$cleanPath", apiKey, extraQuery))
+        val connection = url.openConnection() as HttpURLConnection
+        try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 12000
+            connection.readTimeout = 20000
+            connection.setRequestProperty("Accept", "application/json")
+            val code = connection.responseCode
+            val body = if (code in 200..299) {
+                connection.inputStream.bufferedReader().use { it.readText() }
+            } else {
+                connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            }
+            if (code !in 200..299) {
+                throw Exception("StatPal v2 ($cleanPath) HTTP $code: ${body.take(240)}")
+            }
+            lastExtraEndpointResponse = body
+            return body
         } finally {
             connection.disconnect()
         }
@@ -160,7 +225,8 @@ object StatPalApi {
 
     fun fetchLiveMatches(
         apiKey: String,
-        offset: Int = 0
+        offset: Int = 0,
+        useDedicatedLiveEndpoint: Boolean = false
     ): List<ScorexMatch> {
 
         require(apiKey.isNotBlank()) {
@@ -169,14 +235,13 @@ object StatPalApi {
 
         lastWasRateLimited = false
 
-        val encodedKey = URLEncoder.encode(
-            apiKey.trim(),
-            "UTF-8"
-        )
+        val targetUrl = if (useDedicatedLiveEndpoint && offset == 0) {
+            buildUrlWithKey(LIVE_URL, apiKey)
+        } else {
+            buildUrlWithKey(DAILY_URL, apiKey, mapOf("offset" to offset.toString()))
+        }
 
-        val url = URL(
-            "$BASE_URL?offset=$offset&access_key=$encodedKey"
-        )
+        val url = URL(targetUrl)
 
         val connection =
             url.openConnection() as HttpURLConnection
@@ -219,7 +284,7 @@ object StatPalApi {
                             "Hibás StatPal lekérdezés."
 
                         404 ->
-                            "A StatPal napi végpont nem található."
+                            "A StatPal végpont nem található."
 
                         429 ->
                             "API lekérési korlát elérve (429)."
