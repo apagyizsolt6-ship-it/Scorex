@@ -3,6 +3,7 @@ package hu.scorex.app
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.widget.Toast
 import androidx.compose.foundation.background
@@ -216,8 +217,19 @@ internal fun HomeScreen(
             statusMessage = "Kapcsolódás a StatPalhoz (${formatOffsetLabel(dayOffset)})..."
 
             try {
+                val previousSnapshot = matches
                 val result = withContext(Dispatchers.IO) {
                     StatPalApi.fetchLiveMatches(apiKey, dayOffset)
+                }
+
+                if (dayOffset == 0 && previousSnapshot.isNotEmpty() && !isCachedData) {
+                    ScorexNotifier.detectAndNotifyChanges(
+                        context = context,
+                        preferences = preferences,
+                        previousMatches = previousSnapshot,
+                        currentMatches = result,
+                        savedTips = savedTips.toList()
+                    )
                 }
 
                 matches = result
@@ -640,17 +652,17 @@ internal fun HomeScreen(
                     Text(
                         text = headerText,
                         color = GoldAccent,
-                        fontSize = 15.sp,
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.weight(1f)
                     )
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                         if (savedTips.isNotEmpty()) {
                             Text(
-                                text = "MÁSOLÁS",
+                                text = "MÁSOL",
                                 color = CyanAccent,
-                                fontSize = 10.sp,
+                                fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(7.dp))
@@ -669,13 +681,35 @@ internal fun HomeScreen(
                                     }
                                     .padding(horizontal = 6.dp, vertical = 3.dp)
                             )
+
+                            Text(
+                                text = "MEGOSZT",
+                                color = AccentColor,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .background(GlassWell)
+                                    .clickable {
+                                        val shareText = "SCOREX SZELVÉNY:\n" + savedTips.joinToString("\n") { "• $it" }
+                                        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                            type = "text/plain"
+                                            putExtra(Intent.EXTRA_SUBJECT, "Scorex szelvény")
+                                            putExtra(Intent.EXTRA_TEXT, shareText)
+                                        }
+                                        context.startActivity(
+                                            Intent.createChooser(sendIntent, "Szelvény megosztása")
+                                        )
+                                    }
+                                    .padding(horizontal = 6.dp, vertical = 3.dp)
+                            )
                         }
 
                         if (settledCount > 0) {
                             Text(
                                 text = "LEZÁRTAK",
                                 color = WarningColor,
-                                fontSize = 10.sp,
+                                fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(7.dp))
@@ -689,7 +723,7 @@ internal fun HomeScreen(
                             Text(
                                 text = "TÖRLÉS",
                                 color = ErrorColor,
-                                fontSize = 10.sp,
+                                fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(7.dp))
@@ -854,10 +888,10 @@ private fun ScorexFavoritesTeamsQuickBar(
 
     val activeTeamMatches = remember(favoriteTeams, matches) {
         favoriteTeams.sorted().mapNotNull { teamKey ->
-            val match = matches.firstOrNull {
+            val teamMatches = matches.filter {
                 favoriteTeamKey(it.homeTeam) == teamKey || favoriteTeamKey(it.awayTeam) == teamKey
             }
-            teamKey to match
+            if (teamMatches.isEmpty()) null else teamKey to teamMatches
         }
     }
 
@@ -882,12 +916,16 @@ private fun ScorexFavoritesTeamsQuickBar(
                 .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            activeTeamMatches.forEach { (teamKey, matched) ->
+            activeTeamMatches.forEach { (teamKey, teamMatches) ->
                 val isSelected = selectedTeam == teamKey
-                val label = matched?.let {
-                    val displayName = if (favoriteTeamKey(it.homeTeam) == teamKey) it.homeTeam else it.awayTeam
-                    "$displayName (${it.homeScore}:${it.awayScore} • ${it.matchTime})"
-                } ?: teamKey
+                val firstMatch = teamMatches.first()
+                val displayName = if (favoriteTeamKey(firstMatch.homeTeam) == teamKey) {
+                    firstMatch.homeTeam
+                } else {
+                    firstMatch.awayTeam
+                }
+                val extraCount = if (teamMatches.size > 1) " +${teamMatches.size - 1}" else ""
+                val label = "$displayName (${firstMatch.homeScore}:${firstMatch.awayScore} • ${firstMatch.matchTime})$extraCount"
 
                 Box(
                     modifier = Modifier
@@ -906,7 +944,7 @@ private fun ScorexFavoritesTeamsQuickBar(
                                 onSelectTeam(null)
                             } else {
                                 onSelectTeam(teamKey)
-                                if (matched != null) onOpenMatch(matched)
+                                if (teamMatches.size == 1) onOpenMatch(firstMatch)
                             }
                         }
                         .padding(horizontal = 10.dp, vertical = 6.dp)
