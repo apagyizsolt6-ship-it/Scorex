@@ -31,6 +31,9 @@ object StatPalApi {
     private const val BASE_URL =
         "https://statpal.io/api/v2/soccer/matches/daily"
 
+    private const val USAGE_URL =
+        "https://statpal.io/api/user-request-count"
+
     private val targetZone: ZoneId = ZoneId.of("Europe/Budapest")
     private val outTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
     private val outDateFormatter: DateTimeFormatter = DateTimeFormatter.ISO_LOCAL_DATE
@@ -75,6 +78,14 @@ object StatPalApi {
     var lastMatchCount: Int = 0
         private set
 
+    @Volatile
+    var lastDailyRequestCount: String = "-"
+        private set
+
+    @Volatile
+    var lastWasRateLimited: Boolean = false
+        private set
+
     private data class ParseStats(
         var rawCount: Int = 0,
         var duplicateCount: Int = 0,
@@ -82,6 +93,41 @@ object StatPalApi {
         var invalidCount: Int = 0,
         val skippedDetails: MutableList<String> = mutableListOf()
     )
+
+    fun fetchDailyRequestCount(apiKey: String): String {
+        if (apiKey.isBlank()) return "-"
+        val encodedKey = URLEncoder.encode(apiKey.trim(), "UTF-8")
+        val url = URL("$USAGE_URL?access_key=$encodedKey")
+        val connection = url.openConnection() as HttpURLConnection
+        return try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 10000
+            connection.readTimeout = 15000
+            connection.setRequestProperty("Accept", "application/json")
+            val code = connection.responseCode
+            if (code !in 200..299) {
+                lastDailyRequestCount
+            } else {
+                val body = connection.inputStream.bufferedReader().use { it.readText() }.trim()
+                val parsed = runCatching {
+                    val tok = JSONTokener(body).nextValue()
+                    when (tok) {
+                        is JSONObject -> tok.opt("count")?.toString()
+                            ?: tok.opt("request_count")?.toString()
+                            ?: tok.opt("requests")?.toString()
+                            ?: body
+                        else -> body.removeSurrounding("\"")
+                    }
+                }.getOrDefault(body)
+                lastDailyRequestCount = parsed.ifBlank { "-" }
+                lastDailyRequestCount
+            }
+        } catch (_: Exception) {
+            lastDailyRequestCount
+        } finally {
+            connection.disconnect()
+        }
+    }
 
     private fun convertUtcKickoffToLocal(
         rawDate: String,
@@ -121,6 +167,8 @@ object StatPalApi {
             "Hiányzik a StatPal API-kulcs!"
         }
 
+        lastWasRateLimited = false
+
         val encodedKey = URLEncoder.encode(
             apiKey.trim(),
             "UTF-8"
@@ -159,6 +207,9 @@ object StatPalApi {
             lastRawResponse = response
 
             if (code !in 200..299) {
+                if (code == 429) {
+                    lastWasRateLimited = true
+                }
                 throw Exception(
                     when (code) {
                         401, 403 ->
@@ -171,7 +222,7 @@ object StatPalApi {
                             "A StatPal napi végpont nem található."
 
                         429 ->
-                            "API lekérési korlát elérve."
+                            "API lekérési korlát elérve (429)."
 
                         else ->
                             "StatPal HTTP hiba: $code"
