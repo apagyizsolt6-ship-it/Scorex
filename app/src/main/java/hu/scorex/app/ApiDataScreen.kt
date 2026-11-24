@@ -99,12 +99,34 @@ fun ApiDataScreen(
             gradientColors = listOf(GlassSurface, GlassWell)
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
-                Text(
-                    text = "KIHAGYOTT MÉRKŐZÉSEK RÉSZLETEI",
-                    color = WarningColor,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "KIHAGYOTT MÉRKŐZÉSEK",
+                        color = WarningColor,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    if (skippedDetails.isNotBlank() && skippedMatchCount > 0) {
+                        FilledTonalButton(
+                            onClick = {
+                                val clipboard =
+                                    context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                val clip = ClipData.newPlainText("Scorex kihagyott meccsek", skippedDetails)
+                                clipboard.setPrimaryClip(clip)
+                                Toast.makeText(context, "Kihagyások vágólapra másolva!", Toast.LENGTH_SHORT).show()
+                            },
+                            shape = RoundedCornerShape(9.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text(text = "⧉ MÁSOLÁS", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     text = if (skippedDetails.isBlank()) {
