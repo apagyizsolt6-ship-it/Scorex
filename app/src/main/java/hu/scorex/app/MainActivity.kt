@@ -1,336 +1,299 @@
 package hu.scorex.app
 
+import android.content.Context
 import android.content.SharedPreferences
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.*
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import org.json.JSONObject
-import java.util.Locale
+import androidx.compose.ui.unit.sp
+import java.text.Normalizer
+
+internal val BackgroundColor = Color(0xFF060B14)
+internal val SurfaceColor = Color(0xFF0E1726)
+internal val GlassTop = Color(0xFF17243A)
+internal val GlassSurface = Color(0xFF101B2D)
+internal val GlassWell = Color(0xFF0A1220)
+internal val AccentColor = Color(0xFF00E676)
+internal val CyanAccent = Color(0xFF29B6F6)
+internal val GoldAccent = Color(0xFFFFD54F)
+internal val PurpleAccent = Color(0xFFB388FF)
+internal val SecondaryColor = Color(0xFF9FB0C7)
+internal val ErrorColor = Color(0xFFFF5252)
+internal val WarningColor = Color(0xFFFFB74D)
 
 class MainActivity : ComponentActivity() {
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val preferences = getSharedPreferences(
-            "scorex_settings",
-            MODE_PRIVATE
-        )
+        val preferences = getSharedPreferences("scorex_prefs", Context.MODE_PRIVATE)
 
         setContent {
-            ScorexApp(preferences)
+            MaterialTheme {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = BackgroundColor
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color(0xFF091324),
+                                        BackgroundColor,
+                                        Color(0xFF050911)
+                                    )
+                                )
+                            )
+                    ) {
+                        ScorexApp(preferences = preferences)
+                    }
+                }
+            }
         }
     }
 }
 
-internal val BackgroundColor = Color(0xFF070D19)
-internal val GlassSurface = Color(0xFF13233A).copy(alpha = 0.74f)
-internal val GlassTop = Color(0xFF1F385C).copy(alpha = 0.58f)
-internal val GlassWell = Color(0xFF0B1424).copy(alpha = 0.80f)
-internal val AccentColor = Color(0xFF35E0A1)
-internal val SecondaryColor = Color(0xFF9FB0C7)
-internal val ErrorColor = Color(0xFFFF7777)
-internal val WarningColor = Color(0xFFFFB74D)
-internal val CyanAccent = Color(0xFF38BDF8)
-internal val PurpleAccent = Color(0xFFA78BFA)
-internal val GoldAccent = Color(0xFFFFC857)
-
-internal enum class TipFilter(val label: String) {
-    ALL("Mind"),
-    WINNING("Jó állás"),
-    PENDING("Várakozik"),
-    SETTLED("Lezárt")
-}
-
-internal data class TipSnapshot(
-    val statusLabel: String,
-    val scorePreview: String?
-)
-
 @Composable
 internal fun GlassPanel(
-    borderColor: Color,
-    gradientColors: List<Color>,
     modifier: Modifier = Modifier,
-    content: @Composable ColumnScope.() -> Unit
+    borderColor: Color = Color.White.copy(alpha = 0.10f),
+    gradientColors: List<Color> = listOf(GlassSurface, GlassWell),
+    content: @Composable () -> Unit
 ) {
     val shape = RoundedCornerShape(16.dp)
-    Card(
+    Box(
         modifier = modifier
-            .fillMaxWidth()
-            .border(width = 1.dp, color = borderColor, shape = shape),
-        shape = shape,
-        colors = CardDefaults.cardColors(containerColor = Color.Transparent)
+            .clip(shape)
+            .background(Brush.verticalGradient(gradientColors))
+            .androidx.compose.foundation.border(width = 1.dp, color = borderColor, shape = shape)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Brush.linearGradient(colors = gradientColors))
-                .border(
-                    width = 0.5.dp,
-                    color = Color.White.copy(alpha = 0.14f),
-                    shape = shape
-                ),
-            content = content
+        content()
+    }
+}
+
+@Composable
+internal fun ScorexSectionBadge(
+    text: String,
+    tint: Color = AccentColor,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(tint.copy(alpha = 0.14f))
+            .androidx.compose.foundation.border(
+                width = 1.dp,
+                color = tint.copy(alpha = 0.34f),
+                shape = RoundedCornerShape(50)
+            )
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+    ) {
+        Text(
+            text = text,
+            color = tint,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.4.sp
         )
     }
 }
 
-internal fun normalizeTeamKey(name: String): String {
-    return name
-        .lowercase(Locale("hu", "HU"))
-        .replace(Regex("[^a-z0-9áéíóöőúüű ]"), " ")
+internal fun isMatchLive(match: ScorexMatch): Boolean {
+    val t = match.matchTime.trim().uppercase()
+    val s = match.rawStatus.trim().uppercase()
+    if (t == "FT" || t == "AET" || t == "PEN" || t == "ELHALASZTVA" || t == "TÖRÖLVE" || t == "FÉLBESZAKADT") {
+        return false
+    }
+    if (s == "FT" || s == "AET" || s == "PEN" || s == "PST" || s == "CANC" || s == "CANCELLED" || s == "ABD" || s == "ABANDONED" || s == "NS" || s == "TBD") {
+        return false
+    }
+    if (t == "HT" || t == "ÉLŐ" || s == "HT" || s == "LIVE" || s == "IN PLAY" || s == "1H" || s == "2H" || s == "ET" || s == "BT" || s == "P") {
+        return true
+    }
+    if (t.endsWith("'") || t.contains("+")) {
+        return true
+    }
+    return s.all { it.isDigit() } && s.isNotBlank()
+}
+
+internal fun isMatchFinished(match: ScorexMatch): Boolean {
+    val t = match.matchTime.trim().uppercase()
+    val s = match.rawStatus.trim().uppercase()
+    return t == "FT" || t == "AET" || t == "PEN" || s == "FT" || s == "AET" || s == "PEN"
+}
+
+internal fun translateLeagueName(rawLeague: String): String {
+    val trimmed = rawLeague.trim()
+    if (trimmed.isBlank()) return "Ismeretlen bajnokság"
+
+    val lower = trimmed.lowercase()
+    return when {
+        "premier league" in lower && ("england" in lower || "en" in lower || ":" !in lower) -> "Anglia: Premier League"
+        "championship" in lower && "england" in lower -> "Anglia: Championship"
+        "la liga" in lower || "primera division" in lower -> "Spanyolország: La Liga"
+        "serie a" in lower && ("italy" in lower || ":" !in lower) -> "Olaszország: Serie A"
+        "bundesliga" in lower && "2." !in lower -> "Németország: Bundesliga"
+        "2. bundesliga" in lower -> "Németország: 2. Bundesliga"
+        "ligue 1" in lower -> "Franciaország: Ligue 1"
+        "nb i" in lower || "otp bank liga" in lower || "hungary" in lower && "liga" in lower -> "Magyarország: NB I"
+        "champions league" in lower -> "Nemzetközi: Bajnokok Ligája"
+        "europa league" in lower && "conference" !in lower -> "Nemzetközi: Európa-liga"
+        "conference league" in lower -> "Nemzetközi: Konferencia-liga"
+        "eredivisie" in lower -> "Hollandia: Eredivisie"
+        "primeira liga" in lower || "liga portugal" in lower -> "Portugália: Liga Portugal"
+        else -> trimmed
+    }
+}
+
+internal fun favoriteTeamKey(teamName: String): String {
+    return normalizeTeamKey(teamName)
+}
+
+internal fun normalizeTeamKey(teamName: String): String {
+    val normalized = Normalizer.normalize(teamName.trim().lowercase(), Normalizer.Form.NFD)
+        .replace(Regex("\\p{InCombiningDiacriticalMarks}+"), "")
+    return normalized
+        .replace(Regex("[^a-z0-9 ]"), " ")
+        .replace(Regex("\\b(fc|cf|sc|ac|as|afc|fk|sk|nk|ud|cd|sd|rc|rcd|ca|ssc|us|sv|vfb|fsv|rb|inter|united|city)\\b"), " ")
         .replace(Regex("\\s+"), " ")
         .trim()
 }
 
-internal fun favoriteTeamKey(name: String): String {
-    val normalized = normalizeTeamKey(name)
-    return normalized.ifBlank { name.trim() }
-}
-
-internal fun loadTipSnapshots(preferences: SharedPreferences): MutableMap<String, TipSnapshot> {
-    val raw = preferences.getString("scorex_tip_snapshots", "{}").orEmpty()
-    val result = mutableMapOf<String, TipSnapshot>()
-    runCatching {
-        val obj = JSONObject(raw)
-        val keys = obj.keys()
-        while (keys.hasNext()) {
-            val k = keys.next()
-            val item = obj.optJSONObject(k)
-            if (item != null) {
-                val label = item.optString("status", "")
-                val preview = item.optString("preview", "").ifBlank { null }
-                if (label.isNotBlank()) {
-                    result[k] = TipSnapshot(statusLabel = label, scorePreview = preview)
-                }
-            }
-        }
-    }
-    return result
-}
-
-internal fun saveTipSnapshots(
-    preferences: SharedPreferences,
-    snapshots: Map<String, TipSnapshot>
-) {
-    val root = JSONObject()
-    snapshots.forEach { (tip, snap) ->
-        root.put(
-            tip,
-            JSONObject().apply {
-                put("status", snap.statusLabel)
-                put("preview", snap.scorePreview.orEmpty())
-            }
-        )
-    }
-    preferences.edit().putString("scorex_tip_snapshots", root.toString()).apply()
-}
-
 @Composable
 fun ScorexApp(preferences: SharedPreferences) {
+    var apiKey by remember {
+        mutableStateOf(preferences.getString("statpal_api_key", "").orEmpty())
+    }
+
+    var matches by remember { mutableStateOf<List<ScorexMatch>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf("") }
+    var lastUpdatedText by remember { mutableStateOf("") }
 
     var showSettings by remember { mutableStateOf(false) }
     var showApiData by remember { mutableStateOf(false) }
+    var showLeagueHub by remember { mutableStateOf(false) }
     var selectedMatch by remember { mutableStateOf<ScorexMatch?>(null) }
+    var selectedProfile by remember { mutableStateOf<Triple<String, String, String>?>(null) }
 
-    val savedTips = remember {
-        mutableStateListOf<String>().apply {
-            addAll(
-                preferences.getStringSet("scorex_tips", emptySet())
-                    .orEmpty()
-                    .sorted()
-            )
-        }
+    var savedTips by remember {
+        mutableStateOf(
+            preferences.getStringSet("saved_tips", emptySet()).orEmpty().toList().sorted()
+        )
     }
 
-    val tipSnapshots = remember {
-        mutableStateMapOf<String, TipSnapshot>().apply {
-            putAll(loadTipSnapshots(preferences))
-        }
-    }
-
-    fun persistTips() {
-        preferences.edit()
-            .putStringSet("scorex_tips", savedTips.toSet())
-            .apply()
-        val activeKeys = savedTips.toSet()
-        tipSnapshots.keys.retainAll(activeKeys)
-        saveTipSnapshots(preferences, tipSnapshots)
-    }
-
-    fun toggleTip(tipLabel: String) {
-        if (tipLabel in savedTips) {
-            savedTips.remove(tipLabel)
-            tipSnapshots.remove(tipLabel)
+    fun toggleTip(tip: String) {
+        val updated = savedTips.toMutableSet()
+        if (tip in updated) {
+            updated.remove(tip)
         } else {
-            savedTips.add(tipLabel)
+            updated.add(tip)
         }
-        persistTips()
+        preferences.edit().putStringSet("saved_tips", updated).apply()
+        savedTips = updated.toList().sorted()
     }
 
-    MaterialTheme {
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = BackgroundColor
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color(0xFF0F2038),
-                                BackgroundColor,
-                                Color(0xFF091221)
-                            )
-                        )
-                    )
-            ) {
-                when {
-                    selectedMatch != null -> {
-                        MatchDetailScreen(
-                            match = selectedMatch!!,
-                            preferences = preferences,
-                            savedTips = savedTips,
-                            onToggleTip = ::toggleTip,
-                            onBack = { selectedMatch = null }
-                        )
-                    }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(top = 8.dp)
+    ) {
+        when {
+            selectedProfile != null -> {
+                val (kind, id, title) = selectedProfile!!
+                EntityProfileScreen(
+                    initialKind = kind,
+                    initialId = id,
+                    initialTitle = title,
+                    preferences = preferences,
+                    onBack = { selectedProfile = null }
+                )
+            }
 
-                    showApiData -> {
-                        ApiDataScreen(onBack = { showApiData = false })
-                    }
+            selectedMatch != null -> {
+                MatchDetailScreen(
+                    match = selectedMatch!!,
+                    preferences = preferences,
+                    savedTips = savedTips,
+                    onToggleTip = ::toggleTip,
+                    onOpenProfile = { kind, id, title ->
+                        selectedProfile = Triple(kind, id, title)
+                    },
+                    onBack = { selectedMatch = null }
+                )
+            }
 
-                    showSettings -> {
-                        ApiSettingsScreen(
-                            preferences = preferences,
-                            onBack = { showSettings = false }
-                        )
-                    }
+            showLeagueHub -> {
+                LeagueHubScreen(
+                    preferences = preferences,
+                    onBack = { showLeagueHub = false }
+                )
+            }
 
-                    else -> {
-                        HomeScreen(
-                            preferences = preferences,
-                            savedTips = savedTips,
-                            tipSnapshots = tipSnapshots,
-                            onUpdateTipSnapshots = { updated ->
-                                tipSnapshots.clear()
-                                tipSnapshots.putAll(updated)
-                                saveTipSnapshots(preferences, tipSnapshots)
-                            },
-                            onRemoveTip = { tip ->
-                                savedTips.remove(tip)
-                                tipSnapshots.remove(tip)
-                                persistTips()
-                            },
-                            onClearTips = {
-                                savedTips.clear()
-                                tipSnapshots.clear()
-                                persistTips()
-                            },
-                            onRemoveSettledTips = { activeMatches ->
-                                val settledStatuses = setOf("Találat", "Nem jött be", "Lezárult")
-                                savedTips.removeAll { tip ->
-                                    val liveEval = evaluateTipStatus(tip, activeMatches).first
-                                    val cachedEval = tipSnapshots[tip]?.statusLabel
-                                    (liveEval in settledStatuses) || (cachedEval in settledStatuses)
-                                }
-                                persistTips()
-                            },
-                            onSelectMatch = { match -> selectedMatch = match },
-                            onOpenSettings = { showSettings = true },
-                            onOpenApiData = { showApiData = true }
-                        )
-                    }
-                }
+            showApiData -> {
+                ApiDataScreen(
+                    onBack = { showApiData = false }
+                )
+            }
+
+            showSettings -> {
+                SettingsScreen(
+                    preferences = preferences,
+                    currentApiKey = apiKey,
+                    onSaveApiKey = { newKey ->
+                        val cleaned = newKey.trim()
+                        preferences.edit().putString("statpal_api_key", cleaned).apply()
+                        apiKey = cleaned
+                        showSettings = false
+                    },
+                    onBack = { showSettings = false }
+                )
+            }
+
+            else -> {
+                HomeScreen(
+                    preferences = preferences,
+                    apiKey = apiKey,
+                    matches = matches,
+                    isLoading = isLoading,
+                    errorMessage = errorMessage,
+                    lastUpdatedText = lastUpdatedText,
+                    savedTips = savedTips,
+                    onMatchesLoaded = { loaded, timeLabel ->
+                        matches = loaded
+                        errorMessage = ""
+                        lastUpdatedText = timeLabel
+                    },
+                    onError = { msg ->
+                        errorMessage = msg
+                    },
+                    onLoadingChange = { loading ->
+                        isLoading = loading
+                    },
+                    onOpenSettings = { showSettings = true },
+                    onOpenApiData = { showApiData = true },
+                    onOpenLeagueHub = { showLeagueHub = true },
+                    onOpenMatch = { match -> selectedMatch = match },
+                    onToggleTip = ::toggleTip
+                )
             }
         }
     }
-}
-
-internal fun formatOffsetLabel(offset: Int): String = when (offset) {
-    0 -> "Ma (0)"
-    -1 -> "Tegnap (-1)"
-    1 -> "Holnap (+1)"
-    else -> if (offset > 0) "+$offset nap" else "$offset nap"
-}
-
-internal fun findMatchingMatch(
-    tip: String,
-    matches: List<ScorexMatch>
-): ScorexMatch? {
-    val colonIdx = tip.lastIndexOf(": ")
-    if (colonIdx <= 0) return null
-    val teamsPart = tip.substring(0, colonIdx)
-    val dashIdx = teamsPart.indexOf(" – ")
-    if (dashIdx <= 0) return null
-
-    val home = normalizeTeamKey(teamsPart.substring(0, dashIdx))
-    val away = normalizeTeamKey(teamsPart.substring(dashIdx + 3))
-    if (home.isBlank() || away.isBlank()) return null
-
-    return matches.firstOrNull {
-        val mHome = normalizeTeamKey(it.homeTeam)
-        val mAway = normalizeTeamKey(it.awayTeam)
-        (mHome == home && mAway == away) ||
-            (mHome.contains(home) && mAway.contains(away)) ||
-            (home.contains(mHome) && away.contains(mAway))
-    }
-}
-
-internal fun statusColorForLabel(label: String): Color = when (label) {
-    "Találat", "Nyerésre áll" -> AccentColor
-    "Nem jött be" -> ErrorColor
-    "Jelenleg nem jó" -> WarningColor
-    "Lezárult", "Várakozik", "Mentve" -> SecondaryColor
-    else -> CyanAccent
-}
-
-internal fun evaluateTipStatus(
-    tip: String,
-    matches: List<ScorexMatch>,
-    fallbackSnapshot: TipSnapshot? = null
-): Pair<String, Color> {
-    val colonIdx = tip.lastIndexOf(": ")
-    if (colonIdx <= 0) return "Mentve" to SecondaryColor
-
-    val pickPart = tip.substring(colonIdx + 2).trim()
-    val match = findMatchingMatch(tip, matches)
-        ?: fallbackSnapshot?.let { return it.statusLabel to statusColorForLabel(it.statusLabel) }
-        ?: return "Várakozik" to SecondaryColor
-
-    val hScore = match.homeScore.toIntOrNull()
-    val aScore = match.awayScore.toIntOrNull()
-    val finished = isMatchFinished(match)
-
-    if (hScore == null || aScore == null) {
-        val label = if (finished) "Lezárult" else match.matchTime
-        return label to statusColorForLabel(label)
-    }
-
-    val outcome = when {
-        hScore > aScore -> "1 ("
-        aScore > hScore -> "2 ("
-        else -> "X ("
-    }
-
-    val isWinning = pickPart.startsWith(outcome)
-    val label = when {
-        finished && isWinning -> "Találat"
-        finished && !isWinning -> "Nem jött be"
-        isWinning -> "Nyerésre áll"
-        else -> "Jelenleg nem jó"
-    }
-    return label to statusColorForLabel(label)
 }
