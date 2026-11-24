@@ -4,6 +4,7 @@ import android.content.SharedPreferences
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -693,6 +694,78 @@ fun HomeScreen(
             fontSize = 10.sp,
             textAlign = TextAlign.Center
         )
+    }
+}
+
+@Composable
+private fun ScorexFavoritesQuickBar(
+    preferences: SharedPreferences,
+    matches: List<ScorexMatch>
+) {
+    val favoriteLeagues = remember(preferences, matches) {
+        preferences.getStringSet("favorite_leagues", emptySet())
+            .orEmpty()
+            .toList()
+            .sortedBy { translateLeagueName(it) }
+    }
+
+    if (favoriteLeagues.isEmpty()) return
+
+    var selectedLeague by remember(favoriteLeagues) {
+        mutableStateOf<String?>(null)
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(
+            text = "KEDVENC LIGÁK",
+            color = GoldAccent,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            favoriteLeagues.forEach { league ->
+                val leagueKey = league.ifBlank { "Ismeretlen bajnokság" }
+                val count = matches.count {
+                    (it.league.ifBlank { "Ismeretlen bajnokság" }) == leagueKey
+                }
+                val isSelected = selectedLeague == leagueKey
+                val label = translateLeagueName(leagueKey)
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            if (isSelected) GoldAccent.copy(alpha = 0.22f)
+                            else GlassWell
+                        )
+                        .border(
+                            width = 1.dp,
+                            color = if (isSelected) GoldAccent else GoldAccent.copy(alpha = 0.35f),
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                        .clickable {
+                            selectedLeague = if (isSelected) null else leagueKey
+                        }
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = "★ $label ($count)",
+                        color = if (isSelected) GoldAccent else Color.White,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
     }
 }
 
