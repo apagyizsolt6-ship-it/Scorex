@@ -107,6 +107,13 @@ private fun hasTipForMatch(match: ScorexMatch, savedTips: List<String>): Boolean
     return savedTips.any { it.startsWith(prefix, ignoreCase = true) }
 }
 
+private fun hasFavoriteTeamInMatch(match: ScorexMatch, favoriteTeams: Set<String>): Boolean {
+    if (favoriteTeams.isEmpty()) return false
+    val hKey = favoriteTeamKey(match.homeTeam)
+    val aKey = favoriteTeamKey(match.awayTeam)
+    return hKey in favoriteTeams || aKey in favoriteTeams
+}
+
 @Composable
 private fun LeagueGlassCard(
     borderColor: Color,
@@ -142,7 +149,9 @@ fun LeagueSection(
     preferences: SharedPreferences,
     savedTips: List<String> = emptyList(),
     selectedLeagueKey: String? = null,
+    selectedTeamKey: String? = null,
     onClearSelectedLeague: () -> Unit = {},
+    onClearSelectedTeam: () -> Unit = {},
     onSelectMatch: (ScorexMatch) -> Unit = {}
 ) {
     val favorites = remember {
@@ -154,12 +163,28 @@ fun LeagueSection(
         }
     }
 
+    val favoriteTeams = remember {
+        mutableStateListOf<String>().apply {
+            addAll(
+                preferences.getStringSet("favorite_teams", emptySet())
+                    ?: emptySet()
+            )
+        }
+    }
+
     DisposableEffect(preferences) {
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
-            if (key == "favorite_leagues") {
-                val updated = prefs.getStringSet("favorite_leagues", emptySet()).orEmpty()
-                favorites.clear()
-                favorites.addAll(updated)
+            when (key) {
+                "favorite_leagues" -> {
+                    val updated = prefs.getStringSet("favorite_leagues", emptySet()).orEmpty()
+                    favorites.clear()
+                    favorites.addAll(updated)
+                }
+                "favorite_teams" -> {
+                    val updated = prefs.getStringSet("favorite_teams", emptySet()).orEmpty()
+                    favoriteTeams.clear()
+                    favoriteTeams.addAll(updated)
+                }
             }
         }
         preferences.registerOnSharedPreferenceChangeListener(listener)
@@ -185,13 +210,17 @@ fun LeagueSection(
         }
     }
 
+    val favoriteTeamSet = remember(favoriteTeams.toList()) { favoriteTeams.toSet() }
+
     val filteredMatches = remember(
         matches,
         searchQuery,
         activeFilter,
         favorites.toList(),
+        favoriteTeamSet,
         savedTips.toList(),
-        selectedLeagueKey
+        selectedLeagueKey,
+        selectedTeamKey
     ) {
         val q = searchQuery.trim().lowercase(Locale("hu", "HU"))
         matches.filter { match ->
@@ -199,10 +228,13 @@ fun LeagueSection(
             val translatedLeague = translateLeagueName(leagueKey).lowercase(Locale("hu", "HU"))
 
             val matchesSelectedLeague = selectedLeagueKey == null || leagueKey == selectedLeagueKey
+            val matchesSelectedTeam = selectedTeamKey == null ||
+                favoriteTeamKey(match.homeTeam) == selectedTeamKey ||
+                favoriteTeamKey(match.awayTeam) == selectedTeamKey
 
             val matchesFilter = when (activeFilter) {
                 LeagueFilter.ALL -> true
-                LeagueFilter.FAVORITES -> leagueKey in favorites
+                LeagueFilter.FAVORITES -> leagueKey in favorites || hasFavoriteTeamInMatch(match, favoriteTeamSet)
                 LeagueFilter.LIVE -> isMatchLive(match)
                 LeagueFilter.TIPS -> hasTipForMatch(match, savedTips)
                 LeagueFilter.FINISHED -> isMatchFinished(match)
@@ -212,9 +244,12 @@ fun LeagueSection(
                 leagueKey.lowercase(Locale("hu", "HU")).contains(q) ||
                 translatedLeague.contains(q) ||
                 match.homeTeam.lowercase(Locale("hu", "HU")).contains(q) ||
-                match.awayTeam.lowercase(Locale("hu", "HU")).contains(q)
+                match.awayTeam.lowercase(Locale("hu", "HU")).contains(q) ||
+                match.matchTime.lowercase(Locale("hu", "HU")).contains(q) ||
+                match.rawStatus.lowercase(Locale("hu", "HU")).contains(q) ||
+                match.date.lowercase(Locale("hu", "HU")).contains(q)
 
-            matchesSelectedLeague && matchesFilter && matchesSearch
+            matchesSelectedLeague && matchesSelectedTeam && matchesFilter && matchesSearch
         }
     }
 
@@ -285,6 +320,40 @@ fun LeagueSection(
             }
         }
 
+        if (selectedTeamKey != null) {
+            LeagueGlassCard(
+                borderColor = LeagueGold.copy(alpha = 0.5f),
+                gradientColors = listOf(LeagueGold.copy(alpha = 0.16f), GlassBase)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "♥ Szűrt csapat: $selectedTeamKey",
+                        color = LeagueGold,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = "ÖSSZES CSAPAT",
+                        color = LeagueCyan,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(7.dp))
+                            .background(GlassDark)
+                            .clickable { onClearSelectedTeam() }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+        }
+
         LeagueGlassCard(
             borderColor = LeagueCyan.copy(alpha = 0.34f),
             gradientColors = listOf(GlassHighlight, GlassBase)
@@ -300,7 +369,7 @@ fun LeagueSection(
                     singleLine = true,
                     placeholder = {
                         Text(
-                            text = "Keresés csapatra vagy bajnokságra...",
+                            text = "Keresés csapatra, ligára vagy időpontra...",
                             color = LeagueText,
                             fontSize = 12.sp
                         )
@@ -458,13 +527,15 @@ fun LeagueSection(
                     if (
                         searchQuery.isNotBlank() ||
                         activeFilter != LeagueFilter.ALL ||
-                        selectedLeagueKey != null
+                        selectedLeagueKey != null ||
+                        selectedTeamKey != null
                     ) {
                         OutlinedButton(
                             onClick = {
                                 searchQuery = ""
                                 activeFilter = LeagueFilter.ALL
                                 onClearSelectedLeague()
+                                onClearSelectedTeam()
                             },
                             shape = RoundedCornerShape(9.dp)
                         ) {
@@ -689,6 +760,7 @@ fun LeagueSection(
                             LiveMatchCard(
                                 match = match,
                                 hasSavedTip = hasTipForMatch(match, savedTips),
+                                hasFavoriteTeam = hasFavoriteTeamInMatch(match, favoriteTeamSet),
                                 onClick = { onSelectMatch(match) }
                             )
                         }
