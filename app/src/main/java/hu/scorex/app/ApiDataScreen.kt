@@ -24,6 +24,8 @@ fun ApiDataScreen(
 ) {
 
     val rawResponse = StatPalApi.lastRawResponse
+    val extraPath = StatPalApi.lastExtraEndpointPath
+    val extraResponse = StatPalApi.lastExtraEndpointResponse
 
     val leagueCount = StatPalApi.lastLeagueCount
     val apiMatchCount = StatPalApi.lastApiMatchCount
@@ -93,6 +95,46 @@ fun ApiDataScreen(
                 DiagnosticRow(label = "Duplikált mérkőzések", value = duplicateMatchCount.toString(), valueColor = WarningColor)
                 DiagnosticRow(label = "Hiányzó csapatnév", value = missingTeamCount.toString(), valueColor = WarningColor)
                 DiagnosticRow(label = "Hibás mérkőzésadat", value = invalidMatchCount.toString(), valueColor = ErrorColor)
+            }
+        }
+
+        if (extraResponse.isNotBlank()) {
+            GlassPanel(
+                borderColor = CyanAccent.copy(alpha = 0.30f),
+                gradientColors = listOf(GlassSurface, GlassWell)
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "EXTRA V2 VÉGPONT: $extraPath",
+                            color = CyanAccent,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilledTonalButton(
+                            onClick = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("Scorex v2 válasz", extraResponse))
+                                Toast.makeText(context, "v2 válasz másolva!", Toast.LENGTH_SHORT).show()
+                            },
+                            shape = RoundedCornerShape(9.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text(text = "⧉ MÁSOLÁS", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Text(
+                        text = extraResponse.take(4000),
+                        color = Color.White,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp
+                    )
+                }
             }
         }
 
