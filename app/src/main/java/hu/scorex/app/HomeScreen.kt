@@ -89,7 +89,7 @@ private fun loadMatchesCache(
 }
 
 @Composable
-fun HomeScreen(
+internal fun HomeScreen(
     preferences: SharedPreferences,
     savedTips: List<String>,
     tipSnapshots: Map<String, TipSnapshot>,
@@ -217,7 +217,6 @@ fun HomeScreen(
                     saveMatchesCache(preferences, dayOffset, result)
                 }
 
-                // Frissítsük a tipp-gyorsítótárat az épp aktív meccsek alapján
                 val updatedSnapshots = tipSnapshots.toMutableMap()
                 var snapshotChanged = false
                 savedTips.forEach { tip ->
