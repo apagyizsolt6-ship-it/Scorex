@@ -6,6 +6,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -82,7 +83,7 @@ internal fun GlassPanel(
         modifier = modifier
             .clip(shape)
             .background(Brush.verticalGradient(gradientColors))
-            .androidx.compose.foundation.border(width = 1.dp, color = borderColor, shape = shape)
+            .border(width = 1.dp, color = borderColor, shape = shape)
     ) {
         content()
     }
@@ -98,7 +99,7 @@ internal fun ScorexSectionBadge(
         modifier = modifier
             .clip(RoundedCornerShape(50))
             .background(tint.copy(alpha = 0.14f))
-            .androidx.compose.foundation.border(
+            .border(
                 width = 1.dp,
                 color = tint.copy(alpha = 0.34f),
                 shape = RoundedCornerShape(50)
@@ -395,15 +396,6 @@ internal fun normalizeTeamKey(teamName: String): String {
 
 @Composable
 fun ScorexApp(preferences: SharedPreferences) {
-    var apiKey by remember {
-        mutableStateOf(preferences.getString("statpal_api_key", "").orEmpty())
-    }
-
-    var matches by remember { mutableStateOf<List<ScorexMatch>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf("") }
-    var lastUpdatedText by remember { mutableStateOf("") }
-
     var showSettings by remember { mutableStateOf(false) }
     var showApiData by remember { mutableStateOf(false) }
     var showLeagueHub by remember { mutableStateOf(false) }
@@ -416,15 +408,44 @@ fun ScorexApp(preferences: SharedPreferences) {
         )
     }
 
-    fun toggleTip(tip: String) {
-        val updated = savedTips.toMutableSet()
-        if (tip in updated) {
-            updated.remove(tip)
-        } else {
-            updated.add(tip)
-        }
+    var tipSnapshots by remember {
+        mutableStateOf<Map<String, TipSnapshot>>(emptyMap())
+    }
+
+    fun persistTips(updated: Set<String>) {
         preferences.edit().putStringSet("saved_tips", updated).apply()
         savedTips = updated.toList().sorted()
+    }
+
+    fun toggleTip(tip: String) {
+        val updated = savedTips.toMutableSet()
+        if (tip in updated) updated.remove(tip) else updated.add(tip)
+        persistTips(updated)
+    }
+
+    fun removeTip(tip: String) {
+        val updated = savedTips.toMutableSet()
+        updated.remove(tip)
+        persistTips(updated)
+        tipSnapshots = tipSnapshots - tip
+    }
+
+    fun clearTips() {
+        persistTips(emptySet())
+        tipSnapshots = emptyMap()
+    }
+
+    fun removeSettledTips(matches: List<ScorexMatch>) {
+        val toRemove = savedTips.filter { tip ->
+            val st = evaluateTipStatus(tip, matches).first
+            st == "Találat" || st == "Nem jött be" || st == "Lezárult"
+        }
+        if (toRemove.isNotEmpty()) {
+            val updated = savedTips.toMutableSet()
+            toRemove.forEach { updated.remove(it) }
+            persistTips(updated)
+            tipSnapshots = tipSnapshots.filterKeys { it !in toRemove }
+        }
     }
 
     Column(
@@ -471,15 +492,8 @@ fun ScorexApp(preferences: SharedPreferences) {
             }
 
             showSettings -> {
-                SettingsScreen(
+                ApiSettingsScreen(
                     preferences = preferences,
-                    currentApiKey = apiKey,
-                    onSaveApiKey = { newKey ->
-                        val cleaned = newKey.trim()
-                        preferences.edit().putString("statpal_api_key", cleaned).apply()
-                        apiKey = cleaned
-                        showSettings = false
-                    },
                     onBack = { showSettings = false }
                 )
             }
@@ -487,28 +501,19 @@ fun ScorexApp(preferences: SharedPreferences) {
             else -> {
                 HomeScreen(
                     preferences = preferences,
-                    apiKey = apiKey,
-                    matches = matches,
-                    isLoading = isLoading,
-                    errorMessage = errorMessage,
-                    lastUpdatedText = lastUpdatedText,
                     savedTips = savedTips,
-                    onMatchesLoaded = { loaded, timeLabel ->
-                        matches = loaded
-                        errorMessage = ""
-                        lastUpdatedText = timeLabel
-                    },
-                    onError = { msg ->
-                        errorMessage = msg
-                    },
-                    onLoadingChange = { loading ->
-                        isLoading = loading
-                    },
+                    tipSnapshots = tipSnapshots,
+                    onUpdateTipSnapshots = { tipSnapshots = it },
+                    onRemoveTip = ::removeTip,
+                    onClearTips = ::clearTips,
+                    onRemoveSettledTips = ::removeSettledTips,
+                    onSelectMatch = { match -> selectedMatch = match },
                     onOpenSettings = { showSettings = true },
                     onOpenApiData = { showApiData = true },
                     onOpenLeagueHub = { showLeagueHub = true },
-                    onOpenMatch = { match -> selectedMatch = match },
-                    onToggleTip = ::toggleTip
+                    onOpenProfile = { kind, id, title ->
+                        selectedProfile = Triple(kind, id, title)
+                    }
                 )
             }
         }

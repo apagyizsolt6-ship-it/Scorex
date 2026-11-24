@@ -108,19 +108,3 @@ internal fun evaluateTipStatus(
         else -> "Várakozó" to SecondaryColor
     }
 }
-
-internal object ScorexNotifier {
-    fun detectAndNotifyChanges(
-        context: Context,
-        preferences: SharedPreferences,
-        previousMatches: List<ScorexMatch>,
-        currentMatches: List<ScorexMatch>,
-        savedTips: List<String>
-    ) {
-        val _ = context
-        val _ = preferences
-        val _ = previousMatches
-        val _ = currentMatches
-        val _ = savedTips
-    }
-}
