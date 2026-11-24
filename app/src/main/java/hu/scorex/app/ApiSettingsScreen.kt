@@ -1,6 +1,10 @@
 package hu.scorex.app
 
+import android.Manifest
 import android.content.SharedPreferences
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -27,13 +32,11 @@ fun ApiSettingsScreen(
     preferences: SharedPreferences,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
 
     var apiKey by remember {
         mutableStateOf(
-            preferences.getString(
-                "statpal_api_key",
-                ""
-            ).orEmpty()
+            preferences.getString("statpal_api_key", "").orEmpty()
         )
     }
 
@@ -43,12 +46,36 @@ fun ApiSettingsScreen(
         )
     }
 
+    var notifyFavoriteTeams by remember {
+        mutableStateOf(preferences.getBoolean("notify_favorite_teams", true))
+    }
+
+    var notifySavedTips by remember {
+        mutableStateOf(preferences.getBoolean("notify_saved_tips", true))
+    }
+
+    var favoriteTeams by remember {
+        mutableStateOf(
+            preferences.getStringSet("favorite_teams", emptySet()).orEmpty().toList().sorted()
+        )
+    }
+
     var statusText by remember {
         mutableStateOf("Add meg a StatPal API-kulcsodat.")
     }
 
     var isTesting by remember {
         mutableStateOf(false)
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        statusText = if (granted) {
+            "Értesítési engedély megadva."
+        } else {
+            "Az értesítési engedély elutasítva."
+        }
     }
 
     val scope = rememberCoroutineScope()
@@ -74,7 +101,7 @@ fun ApiSettingsScreen(
                 fontWeight = FontWeight.Black
             )
             Text(
-                text = "API BEÁLLÍTÁSOK",
+                text = "BEÁLLÍTÁSOK ÉS ÉRTESÍTÉSEK",
                 color = AccentColor,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold
@@ -246,10 +273,163 @@ fun ApiSettingsScreen(
                     text = statusText,
                     color = if (
                         statusText.contains("hiba", true) ||
-                        statusText.contains("hibás", true)
+                        statusText.contains("hibás", true) ||
+                        statusText.contains("elutasítva", true)
                     ) ErrorColor else AccentColor,
                     fontSize = 12.sp
                 )
+            }
+        }
+
+        GlassPanel(
+            borderColor = CyanAccent.copy(alpha = 0.30f),
+            gradientColors = listOf(GlassTop, GlassSurface)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "ÉLŐ GÓL- ÉS EREDMÉNYÉRTESÍTÉSEK",
+                    color = CyanAccent,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Kedvenc csapatok eseményei",
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Switch(
+                        checked = notifyFavoriteTeams,
+                        onCheckedChange = { checked ->
+                            notifyFavoriteTeams = checked
+                            preferences.edit().putBoolean("notify_favorite_teams", checked).apply()
+                            if (checked && !ScorexNotifier.hasNotificationPermission(context) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            }
+                        }
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Tippszelvényen szereplő meccsek",
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Switch(
+                        checked = notifySavedTips,
+                        onCheckedChange = { checked ->
+                            notifySavedTips = checked
+                            preferences.edit().putBoolean("notify_saved_tips", checked).apply()
+                            if (checked && !ScorexNotifier.hasNotificationPermission(context) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            }
+                        }
+                    )
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        if (!ScorexNotifier.hasNotificationPermission(context) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        } else {
+                            ScorexNotifier.sendNotification(
+                                context = context,
+                                notificationId = 1001,
+                                title = "SCOREX • TESZT ÉRTESÍTÉS",
+                                body = "Az élő gól- és eredményjelzés aktív!"
+                            )
+                            statusText = "Teszt értesítés elküldve."
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("TESZT ÉRTESÍTÉS KÜLDÉSE", color = CyanAccent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        if (favoriteTeams.isNotEmpty()) {
+            GlassPanel(
+                borderColor = GoldAccent.copy(alpha = 0.32f),
+                gradientColors = listOf(GoldAccent.copy(alpha = 0.14f), GlassSurface)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "KEDVENC CSAPATOK (${favoriteTeams.size})",
+                            color = GoldAccent,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "ÖSSZES TÖRLÉSE",
+                            color = ErrorColor,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(7.dp))
+                                .background(GlassWell)
+                                .clickable {
+                                    preferences.edit().remove("favorite_teams").apply()
+                                    favoriteTeams = emptyList()
+                                }
+                                .padding(horizontal = 7.dp, vertical = 3.dp)
+                        )
+                    }
+
+                    favoriteTeams.forEach { teamKey ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(GlassWell)
+                                .padding(horizontal = 10.dp, vertical = 7.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "♥ $teamKey",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                text = "Eltávolít",
+                                color = ErrorColor,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.clickable {
+                                    val updated = favoriteTeams.toMutableSet().apply { remove(teamKey) }
+                                    preferences.edit().putStringSet("favorite_teams", updated).apply()
+                                    favoriteTeams = updated.toList().sorted()
+                                }
+                            )
+                        }
+                    }
+                }
             }
         }
 
