@@ -89,6 +89,15 @@ private fun loadMatchesCache(
     return result
 }
 
+private fun tipPriorityRank(statusLabel: String): Int = when (statusLabel) {
+    "Nyerésre áll" -> 0
+    "Találat" -> 1
+    "Jelenleg nem jó" -> 2
+    "Nem jött be" -> 3
+    "Lezárult" -> 4
+    else -> 5
+}
+
 @Composable
 internal fun HomeScreen(
     preferences: SharedPreferences,
@@ -135,6 +144,8 @@ internal fun HomeScreen(
 
     var dayOffset by remember { mutableIntStateOf(0) }
     var autoRefresh by remember { mutableStateOf(true) }
+    var forceLiveOnly by remember { mutableStateOf(false) }
+    var sortTipsByPriority by remember { mutableStateOf(true) }
     var tipFilter by remember { mutableStateOf(TipFilter.ALL) }
     var selectedQuickLeague by remember { mutableStateOf<String?>(null) }
     var selectedQuickTeam by remember { mutableStateOf<String?>(null) }
@@ -145,6 +156,7 @@ internal fun HomeScreen(
     var isLoading by remember { mutableStateOf(false) }
     var refreshTrigger by remember { mutableIntStateOf(0) }
     var lastUpdated by remember { mutableStateOf("") }
+    var dailyUsageText by remember { mutableStateOf(StatPalApi.lastDailyRequestCount) }
 
     val favoriteCount = remember(preferences, matches) {
         preferences.getStringSet("favorite_leagues", emptySet()).orEmpty().size
@@ -165,8 +177,8 @@ internal fun HomeScreen(
         }
     }
 
-    val filteredTipStatuses = remember(tipStatuses, tipFilter) {
-        when (tipFilter) {
+    val filteredTipStatuses = remember(tipStatuses, tipFilter, sortTipsByPriority) {
+        val filtered = when (tipFilter) {
             TipFilter.ALL -> tipStatuses
             TipFilter.WINNING -> tipStatuses.filter { (_, st, _) ->
                 st.first == "Nyerésre áll" || st.first == "Találat"
@@ -177,6 +189,11 @@ internal fun HomeScreen(
             TipFilter.SETTLED -> tipStatuses.filter { (_, st, _) ->
                 st.first == "Találat" || st.first == "Nem jött be" || st.first == "Lezárult"
             }
+        }
+        if (sortTipsByPriority) {
+            filtered.sortedBy { (_, st, _) -> tipPriorityRank(st.first) }
+        } else {
+            filtered
         }
     }
 
@@ -215,12 +232,16 @@ internal fun HomeScreen(
         do {
             isLoading = true
             statusMessage = "Kapcsolódás a StatPalhoz (${formatOffsetLabel(dayOffset)})..."
+            var rateLimited = false
 
             try {
                 val previousSnapshot = matches
-                val result = withContext(Dispatchers.IO) {
-                    StatPalApi.fetchLiveMatches(apiKey, dayOffset)
+                val (result, usage) = withContext(Dispatchers.IO) {
+                    val m = StatPalApi.fetchLiveMatches(apiKey, dayOffset)
+                    val u = StatPalApi.fetchDailyRequestCount(apiKey)
+                    m to u
                 }
+                dailyUsageText = usage
 
                 if (dayOffset == 0 && previousSnapshot.isNotEmpty() && !isCachedData) {
                     ScorexNotifier.detectAndNotifyChanges(
@@ -266,6 +287,7 @@ internal fun HomeScreen(
                 lastUpdated = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
 
             } catch (exception: Exception) {
+                rateLimited = StatPalApi.lastWasRateLimited
                 val cached = loadMatchesCache(preferences, dayOffset)
                 if (cached.isNotEmpty()) {
                     matches = cached
@@ -280,7 +302,8 @@ internal fun HomeScreen(
             }
 
             if (autoRefresh) {
-                delay(refreshIntervalSec * 1_000L)
+                val waitSec = if (rateLimited) maxOf(refreshIntervalSec, 30) else refreshIntervalSec
+                delay(waitSec * 1_000L)
             }
         } while (autoRefresh)
     }
@@ -319,7 +342,11 @@ internal fun HomeScreen(
                         )
                     }
                     Text(
-                        text = "ÉLD ÁT A FUTBALLT",
+                        text = if (dailyUsageText != "-") {
+                            "ÉLD ÁT A FUTBALLT • NAPI HÍVÁS: $dailyUsageText"
+                        } else {
+                            "ÉLD ÁT A FUTBALLT"
+                        },
                         color = CyanAccent,
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold
@@ -449,9 +476,32 @@ internal fun HomeScreen(
             )
 
             Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(
+                            if (forceLiveOnly) AccentColor.copy(alpha = 0.22f)
+                            else GlassWell
+                        )
+                        .border(
+                            width = 1.dp,
+                            color = if (forceLiveOnly) AccentColor else Color.White.copy(alpha = 0.12f),
+                            shape = RoundedCornerShape(9.dp)
+                        )
+                        .clickable { forceLiveOnly = !forceLiveOnly }
+                        .padding(horizontal = 7.dp, vertical = 5.dp)
+                ) {
+                    Text(
+                        text = "ÉLŐ ($liveMatchesCount)",
+                        color = if (forceLiveOnly) AccentColor else SecondaryColor,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(9.dp))
@@ -465,12 +515,12 @@ internal fun HomeScreen(
                             shape = RoundedCornerShape(9.dp)
                         )
                         .clickable { autoRefresh = !autoRefresh }
-                        .padding(horizontal = 8.dp, vertical = 5.dp)
+                        .padding(horizontal = 7.dp, vertical = 5.dp)
                 ) {
                     Text(
                         text = if (autoRefresh) "AUTO (${refreshIntervalSec}s)" else "AUTO: KI",
                         color = if (autoRefresh) AccentColor else SecondaryColor,
-                        fontSize = 10.sp,
+                        fontSize = 9.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -479,12 +529,12 @@ internal fun HomeScreen(
                     onClick = { refreshTrigger++ },
                     enabled = !isLoading && apiKey.isNotBlank(),
                     shape = RoundedCornerShape(10.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 3.dp)
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 3.dp)
                 ) {
                     Text(
-                        text = "FRISSÍTÉS",
+                        text = "FRISSÍT",
                         color = CyanAccent,
-                        fontSize = 10.sp,
+                        fontSize = 9.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -506,7 +556,8 @@ internal fun HomeScreen(
                 color = when {
                     isCachedData -> WarningColor
                     statusMessage.contains("hiba", true) ||
-                        statusMessage.contains("hibás", true) -> ErrorColor
+                        statusMessage.contains("hibás", true) ||
+                        statusMessage.contains("429", true) -> ErrorColor
                     else -> SecondaryColor
                 },
                 fontSize = 11.sp,
@@ -604,6 +655,7 @@ internal fun HomeScreen(
                 savedTips = savedTips,
                 selectedLeagueKey = selectedQuickLeague,
                 selectedTeamKey = selectedQuickTeam,
+                forceLiveOnly = forceLiveOnly,
                 onClearSelectedLeague = { selectedQuickLeague = null },
                 onClearSelectedTeam = { selectedQuickTeam = null },
                 onSelectMatch = onSelectMatch
@@ -658,6 +710,20 @@ internal fun HomeScreen(
                     )
 
                     Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        if (savedTips.size > 1) {
+                            Text(
+                                text = if (sortTipsByPriority) "AKTÍV ↑" else "SORREND",
+                                color = PurpleAccent,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .background(GlassWell)
+                                    .clickable { sortTipsByPriority = !sortTipsByPriority }
+                                    .padding(horizontal = 6.dp, vertical = 3.dp)
+                            )
+                        }
+
                         if (savedTips.isNotEmpty()) {
                             Text(
                                 text = "MÁSOL",
@@ -795,7 +861,7 @@ internal fun HomeScreen(
                     text = if (savedTips.isEmpty()) {
                         "Koppints bármelyik mérkőzésre a részletekért, és adj hozzá tippeket (1 / X / 2) a szelvényedhez."
                     } else {
-                        "Elmentett tippjeid és aktuális állásuk:"
+                        "Elmentett tippjeid és aktuális állásuk ($settledCount lezárt):"
                     },
                     color = SecondaryColor,
                     fontSize = 12.sp
