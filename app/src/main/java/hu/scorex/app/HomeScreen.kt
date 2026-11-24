@@ -46,8 +46,11 @@ private fun saveMatchesCache(
             JSONObject().apply {
                 put("id", m.id)
                 put("league", m.league)
+                put("leagueId", m.leagueId)
                 put("homeTeam", m.homeTeam)
+                put("homeTeamId", m.homeTeamId)
                 put("awayTeam", m.awayTeam)
+                put("awayTeamId", m.awayTeamId)
                 put("homeScore", m.homeScore)
                 put("awayScore", m.awayScore)
                 put("matchTime", m.matchTime)
@@ -74,8 +77,11 @@ private fun loadMatchesCache(
                 ScorexMatch(
                     id = o.optString("id"),
                     league = o.optString("league"),
+                    leagueId = o.optString("leagueId"),
                     homeTeam = o.optString("homeTeam"),
+                    homeTeamId = o.optString("homeTeamId"),
                     awayTeam = o.optString("awayTeam"),
+                    awayTeamId = o.optString("awayTeamId"),
                     homeScore = o.optString("homeScore", "-"),
                     awayScore = o.optString("awayScore", "-"),
                     matchTime = o.optString("matchTime"),
@@ -109,7 +115,9 @@ internal fun HomeScreen(
     onRemoveSettledTips: (List<ScorexMatch>) -> Unit,
     onSelectMatch: (ScorexMatch) -> Unit,
     onOpenSettings: () -> Unit,
-    onOpenApiData: () -> Unit
+    onOpenApiData: () -> Unit,
+    onOpenLeagueHub: () -> Unit = {},
+    onOpenProfile: (kind: String, id: String, title: String) -> Unit = { _, _, _ -> }
 ) {
 
     val context = LocalContext.current
@@ -644,7 +652,8 @@ internal fun HomeScreen(
                 matches = matches,
                 selectedTeam = selectedQuickTeam,
                 onSelectTeam = { selectedQuickTeam = it },
-                onOpenMatch = onSelectMatch
+                onOpenMatch = onSelectMatch,
+                onOpenProfile = onOpenProfile
             )
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -664,20 +673,41 @@ internal fun HomeScreen(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        OutlinedButton(
-            onClick = onOpenApiData,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(GlassSurface),
-            shape = RoundedCornerShape(12.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(
-                text = "API ADATOK MEGTEKINTÉSE",
-                color = CyanAccent,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold
-            )
+            OutlinedButton(
+                onClick = onOpenLeagueHub,
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(GlassSurface),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text(
+                    text = "BAJNOKSÁGOK & STATISZTIKÁK",
+                    color = GoldAccent,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            OutlinedButton(
+                onClick = onOpenApiData,
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(GlassSurface),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text(
+                    text = "API ADATOK",
+                    color = CyanAccent,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -948,7 +978,8 @@ private fun ScorexFavoritesTeamsQuickBar(
     matches: List<ScorexMatch>,
     selectedTeam: String?,
     onSelectTeam: (String?) -> Unit,
-    onOpenMatch: (ScorexMatch) -> Unit
+    onOpenMatch: (ScorexMatch) -> Unit,
+    onOpenProfile: (kind: String, id: String, title: String) -> Unit
 ) {
     if (favoriteTeams.isEmpty()) return
 
@@ -985,11 +1016,12 @@ private fun ScorexFavoritesTeamsQuickBar(
             activeTeamMatches.forEach { (teamKey, teamMatches) ->
                 val isSelected = selectedTeam == teamKey
                 val firstMatch = teamMatches.first()
-                val displayName = if (favoriteTeamKey(firstMatch.homeTeam) == teamKey) {
-                    firstMatch.homeTeam
-                } else {
-                    firstMatch.awayTeam
-                }
+                val isHome = favoriteTeamKey(firstMatch.homeTeam) == teamKey
+                val displayName = if (isHome) firstMatch.homeTeam else firstMatch.awayTeam
+                val teamId = StatPalApi.resolveTeamId(
+                    displayName,
+                    if (isHome) firstMatch.homeTeamId else firstMatch.awayTeamId
+                )
                 val extraCount = if (teamMatches.size > 1) " +${teamMatches.size - 1}" else ""
                 val label = "$displayName (${firstMatch.homeScore}:${firstMatch.awayScore} • ${firstMatch.matchTime})$extraCount"
 
@@ -1008,6 +1040,8 @@ private fun ScorexFavoritesTeamsQuickBar(
                         .clickable {
                             if (isSelected) {
                                 onSelectTeam(null)
+                            } else if (teamId.isNotBlank() && teamMatches.size == 1) {
+                                onOpenProfile("team", teamId, displayName)
                             } else {
                                 onSelectTeam(teamKey)
                                 if (teamMatches.size == 1) onOpenMatch(firstMatch)
