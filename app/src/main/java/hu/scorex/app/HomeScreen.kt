@@ -1,6 +1,10 @@
 package hu.scorex.app
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.SharedPreferences
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -16,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -23,14 +28,72 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+private fun saveMatchesCache(
+    preferences: SharedPreferences,
+    offset: Int,
+    matches: List<ScorexMatch>
+) {
+    val arr = JSONArray()
+    matches.forEach { m ->
+        arr.put(
+            JSONObject().apply {
+                put("id", m.id)
+                put("league", m.league)
+                put("homeTeam", m.homeTeam)
+                put("awayTeam", m.awayTeam)
+                put("homeScore", m.homeScore)
+                put("awayScore", m.awayScore)
+                put("matchTime", m.matchTime)
+                put("date", m.date)
+                put("rawStatus", m.rawStatus)
+                put("rawKickoff", m.rawKickoff)
+            }
+        )
+    }
+    preferences.edit().putString("scorex_cache_offset_$offset", arr.toString()).apply()
+}
+
+private fun loadMatchesCache(
+    preferences: SharedPreferences,
+    offset: Int
+): List<ScorexMatch> {
+    val raw = preferences.getString("scorex_cache_offset_$offset", null) ?: return emptyList()
+    val result = mutableListOf<ScorexMatch>()
+    runCatching {
+        val arr = JSONArray(raw)
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            result.add(
+                ScorexMatch(
+                    id = o.optString("id"),
+                    league = o.optString("league"),
+                    homeTeam = o.optString("homeTeam"),
+                    awayTeam = o.optString("awayTeam"),
+                    homeScore = o.optString("homeScore", "-"),
+                    awayScore = o.optString("awayScore", "-"),
+                    matchTime = o.optString("matchTime"),
+                    date = o.optString("date"),
+                    rawStatus = o.optString("rawStatus"),
+                    rawKickoff = o.optString("rawKickoff")
+                )
+            )
+        }
+    }
+    return result
+}
 
 @Composable
 fun HomeScreen(
     preferences: SharedPreferences,
     savedTips: List<String>,
+    tipSnapshots: Map<String, TipSnapshot>,
+    onUpdateTipSnapshots: (Map<String, TipSnapshot>) -> Unit,
     onRemoveTip: (String) -> Unit,
     onClearTips: () -> Unit,
     onRemoveSettledTips: (List<ScorexMatch>) -> Unit,
@@ -39,22 +102,17 @@ fun HomeScreen(
     onOpenApiData: () -> Unit
 ) {
 
+    val context = LocalContext.current
+
     var apiKey by remember {
-        mutableStateOf(
-            preferences.getString(
-                "statpal_api_key",
-                ""
-            ).orEmpty()
-        )
+        mutableStateOf(preferences.getString("statpal_api_key", "").orEmpty())
     }
 
     var refreshIntervalSec by remember {
-        mutableIntStateOf(
-            preferences.getInt("refresh_interval_sec", 15).coerceIn(15, 120)
-        )
+        mutableIntStateOf(preferences.getInt("refresh_interval_sec", 15).coerceIn(15, 120))
     }
 
-    LaunchedEffect(preferences) {
+    DisposableEffect(preferences) {
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
             when (key) {
                 "statpal_api_key" -> apiKey = prefs.getString("statpal_api_key", "").orEmpty()
@@ -63,39 +121,22 @@ fun HomeScreen(
             }
         }
         preferences.registerOnSharedPreferenceChangeListener(listener)
+        onDispose {
+            preferences.unregisterOnSharedPreferenceChangeListener(listener)
+        }
     }
 
-    var dayOffset by remember {
-        mutableIntStateOf(0)
-    }
+    var dayOffset by remember { mutableIntStateOf(0) }
+    var autoRefresh by remember { mutableStateOf(true) }
+    var tipFilter by remember { mutableStateOf(TipFilter.ALL) }
+    var selectedQuickLeague by remember { mutableStateOf<String?>(null) }
 
-    var autoRefresh by remember {
-        mutableStateOf(true)
-    }
-
-    var tipFilter by remember {
-        mutableStateOf(TipFilter.ALL)
-    }
-
-    var matches by remember {
-        mutableStateOf<List<ScorexMatch>>(emptyList())
-    }
-
-    var statusMessage by remember {
-        mutableStateOf("Mérkőzések betöltése...")
-    }
-
-    var isLoading by remember {
-        mutableStateOf(false)
-    }
-
-    var refreshTrigger by remember {
-        mutableIntStateOf(0)
-    }
-
-    var lastUpdated by remember {
-        mutableStateOf("")
-    }
+    var matches by remember { mutableStateOf<List<ScorexMatch>>(emptyList()) }
+    var isCachedData by remember { mutableStateOf(false) }
+    var statusMessage by remember { mutableStateOf("Mérkőzések betöltése...") }
+    var isLoading by remember { mutableStateOf(false) }
+    var refreshTrigger by remember { mutableIntStateOf(0) }
+    var lastUpdated by remember { mutableStateOf("") }
 
     val favoriteCount = remember(preferences, matches) {
         preferences.getStringSet("favorite_leagues", emptySet()).orEmpty().size
@@ -105,11 +146,14 @@ fun HomeScreen(
         matches.count { isMatchLive(it) }
     }
 
-    val tipStatuses = remember(savedTips.toList(), matches) {
+    val tipStatuses = remember(savedTips.toList(), matches, tipSnapshots.toMap()) {
         savedTips.map { tip ->
             val matched = findMatchingMatch(tip, matches)
-            val statusPair = evaluateTipStatus(tip, matches)
-            Triple(tip, statusPair, matched)
+            val snap = tipSnapshots[tip]
+            val statusPair = evaluateTipStatus(tip, matches, snap)
+            val preview = matched?.let { "${it.homeScore}:${it.awayScore} • ${it.matchTime}" }
+                ?: snap?.scorePreview
+            Triple(tip, statusPair, matched to preview)
         }
     }
 
@@ -143,10 +187,16 @@ fun HomeScreen(
         }
     }
 
+    val winRatePercent = remember(hitCount, missedCount) {
+        val decided = hitCount + missedCount
+        if (decided > 0) ((hitCount * 100f) / decided).toInt() else null
+    }
+
     LaunchedEffect(apiKey, dayOffset, refreshTrigger, autoRefresh, refreshIntervalSec) {
 
         if (apiKey.isBlank()) {
             matches = emptyList()
+            isCachedData = false
             statusMessage = "Állítsd be a StatPal API-kulcsodat."
             return@LaunchedEffect
         }
@@ -161,6 +211,30 @@ fun HomeScreen(
                 }
 
                 matches = result
+                isCachedData = false
+
+                if (result.isNotEmpty()) {
+                    saveMatchesCache(preferences, dayOffset, result)
+                }
+
+                // Frissítsük a tipp-gyorsítótárat az épp aktív meccsek alapján
+                val updatedSnapshots = tipSnapshots.toMutableMap()
+                var snapshotChanged = false
+                savedTips.forEach { tip ->
+                    val matched = findMatchingMatch(tip, result)
+                    if (matched != null) {
+                        val stLabel = evaluateTipStatus(tip, result).first
+                        val prevText = "${matched.homeScore}:${matched.awayScore} • ${matched.matchTime}"
+                        val newSnap = TipSnapshot(statusLabel = stLabel, scorePreview = prevText)
+                        if (updatedSnapshots[tip] != newSnap) {
+                            updatedSnapshots[tip] = newSnap
+                            snapshotChanged = true
+                        }
+                    }
+                }
+                if (snapshotChanged) {
+                    onUpdateTipSnapshots(updatedSnapshots)
+                }
 
                 statusMessage = if (result.isEmpty()) {
                     "Jelenleg nincs megjeleníthető mérkőzés (${formatOffsetLabel(dayOffset)})."
@@ -168,14 +242,18 @@ fun HomeScreen(
                     "${result.size} mérkőzés betöltve (${formatOffsetLabel(dayOffset)})."
                 }
 
-                lastUpdated = SimpleDateFormat(
-                    "HH:mm:ss",
-                    Locale.getDefault()
-                ).format(Date())
+                lastUpdated = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
 
             } catch (exception: Exception) {
-                statusMessage = exception.message
-                    ?: "Ismeretlen kapcsolódási hiba."
+                val cached = loadMatchesCache(preferences, dayOffset)
+                if (cached.isNotEmpty()) {
+                    matches = cached
+                    isCachedData = true
+                    statusMessage = "Gyorsítótárazott adat (${formatOffsetLabel(dayOffset)}) • ${exception.message ?: "Hálózati hiba"}"
+                } else {
+                    isCachedData = false
+                    statusMessage = exception.message ?: "Ismeretlen kapcsolódási hiba."
+                }
             } finally {
                 isLoading = false
             }
@@ -286,7 +364,10 @@ fun HomeScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 OutlinedButton(
-                    onClick = { dayOffset-- },
+                    onClick = {
+                        selectedQuickLeague = null
+                        dayOffset--
+                    },
                     enabled = !isLoading,
                     shape = RoundedCornerShape(9.dp),
                     contentPadding = PaddingValues(horizontal = 9.dp, vertical = 3.dp)
@@ -307,13 +388,19 @@ fun HomeScreen(
                             color = AccentColor,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.clickable { dayOffset = 0 }
+                            modifier = Modifier.clickable {
+                                selectedQuickLeague = null
+                                dayOffset = 0
+                            }
                         )
                     }
                 }
 
                 OutlinedButton(
-                    onClick = { dayOffset++ },
+                    onClick = {
+                        selectedQuickLeague = null
+                        dayOffset++
+                    },
                     enabled = !isLoading,
                     shape = RoundedCornerShape(9.dp),
                     contentPadding = PaddingValues(horizontal = 9.dp, vertical = 3.dp)
@@ -392,10 +479,12 @@ fun HomeScreen(
                 } else {
                     statusMessage
                 },
-                color = if (
+                color = when {
+                    isCachedData -> WarningColor
                     statusMessage.contains("hiba", true) ||
-                    statusMessage.contains("hibás", true)
-                ) ErrorColor else SecondaryColor,
+                        statusMessage.contains("hibás", true) -> ErrorColor
+                    else -> SecondaryColor
+                },
                 fontSize = 11.sp,
                 modifier = Modifier.weight(1f)
             )
@@ -470,7 +559,9 @@ fun HomeScreen(
         } else {
             ScorexFavoritesQuickBar(
                 preferences = preferences,
-                matches = matches
+                matches = matches,
+                selectedLeague = selectedQuickLeague,
+                onSelectLeague = { selectedQuickLeague = it }
             )
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -479,6 +570,8 @@ fun HomeScreen(
                 matches = matches,
                 preferences = preferences,
                 savedTips = savedTips,
+                selectedLeagueKey = selectedQuickLeague,
+                onClearSelectedLeague = { selectedQuickLeague = null },
                 onSelectMatch = onSelectMatch
             )
         }
@@ -516,17 +609,49 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    val headerText = if (winRatePercent != null) {
+                        "SCOREX TIPPEK (${savedTips.size}) • $winRatePercent%"
+                    } else {
+                        "SCOREX TIPPEK (${savedTips.size})"
+                    }
+
                     Text(
-                        text = "SCOREX TIPPEK (${savedTips.size})",
+                        text = headerText,
                         color = GoldAccent,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
                     )
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (savedTips.isNotEmpty()) {
+                            Text(
+                                text = "MÁSOLÁS",
+                                color = CyanAccent,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .background(GlassWell)
+                                    .clickable {
+                                        val ticketText = savedTips.joinToString("\n") { "• $it" }
+                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        clipboard.setPrimaryClip(
+                                            ClipData.newPlainText("Scorex szelvény", ticketText)
+                                        )
+                                        Toast.makeText(
+                                            context,
+                                            "Szelvény vágólapra másolva!",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                    .padding(horizontal = 6.dp, vertical = 3.dp)
+                            )
+                        }
+
                         if (settledCount > 0) {
                             Text(
-                                text = "LEZÁRTAK TÖRLÉSE",
+                                text = "LEZÁRTAK",
                                 color = WarningColor,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
@@ -540,7 +665,7 @@ fun HomeScreen(
 
                         if (savedTips.isNotEmpty()) {
                             Text(
-                                text = "ÖSSZES TÖRLÉSE",
+                                text = "TÖRLÉS",
                                 color = ErrorColor,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
@@ -620,11 +745,9 @@ fun HomeScreen(
                     fontSize = 12.sp
                 )
 
-                filteredTipStatuses.forEach { (tip, statusPair, matched) ->
+                filteredTipStatuses.forEach { (tip, statusPair, matchInfo) ->
                     val (statusLabel, statusBadgeColor) = statusPair
-                    val scorePreview = matched?.let {
-                        "${it.homeScore}:${it.awayScore} • ${it.matchTime}"
-                    }
+                    val (matched, scorePreview) = matchInfo
 
                     Row(
                         modifier = Modifier
@@ -700,7 +823,9 @@ fun HomeScreen(
 @Composable
 private fun ScorexFavoritesQuickBar(
     preferences: SharedPreferences,
-    matches: List<ScorexMatch>
+    matches: List<ScorexMatch>,
+    selectedLeague: String?,
+    onSelectLeague: (String?) -> Unit
 ) {
     val favoriteLeagues = remember(preferences, matches) {
         preferences.getStringSet("favorite_leagues", emptySet())
@@ -710,10 +835,6 @@ private fun ScorexFavoritesQuickBar(
     }
 
     if (favoriteLeagues.isEmpty()) return
-
-    var selectedLeague by remember(favoriteLeagues) {
-        mutableStateOf<String?>(null)
-    }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -753,7 +874,7 @@ private fun ScorexFavoritesQuickBar(
                             shape = RoundedCornerShape(10.dp)
                         )
                         .clickable {
-                            selectedLeague = if (isSelected) null else leagueKey
+                            onSelectLeague(if (isSelected) null else leagueKey)
                         }
                         .padding(horizontal = 10.dp, vertical = 6.dp)
                 ) {
