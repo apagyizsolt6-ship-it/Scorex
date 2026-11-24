@@ -51,7 +51,12 @@ data class MatchLineupsInfo(
     val homeFormation: String,
     val awayFormation: String,
     val homeStarting: List<LineupPlayerItem>,
-    val awayStarting: List<LineupPlayerItem>
+    val awayStarting: List<LineupPlayerItem>,
+    val homeBench: List<LineupPlayerItem> = emptyList(),
+    val awayBench: List<LineupPlayerItem> = emptyList(),
+    val homeCoach: String = "",
+    val awayCoach: String = "",
+    val status: String = ""
 )
 
 data class InjuryItem(
@@ -222,26 +227,77 @@ object StatPalParsers {
     fun parseOdds(rawJson: String): List<MatchOddsItem> {
         val root = runCatching { JSONTokener(rawJson).nextValue() }.getOrNull() ?: return emptyList()
         val oddsList = mutableListOf<MatchOddsItem>()
-        val objs = mutableListOf<JSONObject>()
-        extractObjects(root, { it.has("odd") || it.has("odds") || it.has("home") || it.has("1") }, objs)
 
-        objs.forEach { o ->
-            val market = o.optString("name").ifBlank { o.optString("market") }.ifBlank { "1X2" }
-            val h = o.optString("1").ifBlank { o.optString("home") }.trim()
-            val d = o.optString("X").ifBlank { o.optString("draw") }.trim()
-            val a = o.optString("2").ifBlank { o.optString("away") }.trim()
-            if (h.isNotBlank() || d.isNotBlank() || a.isNotBlank()) {
-                oddsList.add(
-                    MatchOddsItem(
-                        market = market,
-                        homeOdd = h.ifBlank { "-" },
-                        drawOdd = d.ifBlank { "-" },
-                        awayOdd = a.ifBlank { "-" }
-                    )
-                )
+        fun addIfValid(market: String, h: String, d: String, a: String) {
+            val cleanH = h.trim().ifBlank { "-" }
+            val cleanD = d.trim().ifBlank { "-" }
+            val cleanA = a.trim().ifBlank { "-" }
+            if (cleanH != "-" || cleanD != "-" || cleanA != "-") {
+                oddsList.add(MatchOddsItem(market.trim().ifBlank { "1X2" }, cleanH, cleanD, cleanA))
             }
         }
-        return oddsList.distinctBy { "${it.market}-${it.homeOdd}-${it.drawOdd}-${it.awayOdd}" }.take(8)
+
+        // Handle live odds structure: live_matches[].odds or stats
+        fun processMatchContainer(container: JSONObject) {
+            // 1) Explicit odds array
+            val oddsArr = container.optJSONArray("odds")
+            if (oddsArr != null) {
+                for (i in 0 until oddsArr.length()) {
+                    val o = oddsArr.optJSONObject(i) ?: continue
+                    val market = o.optString("name").ifBlank { o.optString("market") }.ifBlank { o.optString("type") }.ifBlank { "1X2" }
+                    val h = o.optString("1").ifBlank { o.optString("home") }.ifBlank { o.optString("home_odd") }
+                    val d = o.optString("X").ifBlank { o.optString("draw") }.ifBlank { o.optString("draw_odd") }
+                    val a = o.optString("2").ifBlank { o.optString("away") }.ifBlank { o.optString("away_odd") }
+                    addIfValid(market, h, d, a)
+                }
+            }
+
+            // 2) Stats object (Goal, Corner, YellowCard etc. as live counts or odds)
+            val stats = container.optJSONObject("stats")
+            if (stats != null) {
+                val keys = stats.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    val s = stats.optJSONObject(k) ?: continue
+                    val name = s.optString("name").ifBlank { k }
+                    val h = s.optString("home").ifBlank { s.optString("1") }
+                    val a = s.optString("away").ifBlank { s.optString("2") }
+                    if (name.isNotBlank() && (h.isNotBlank() || a.isNotBlank()) && name != "Team") {
+                        addIfValid(name, h, "-", a)
+                    }
+                }
+            }
+
+            // 3) Fallback: scan for simple odd fields
+            if (container.has("1") || container.has("home") || container.has("odd")) {
+                val market = container.optString("name").ifBlank { container.optString("market") }.ifBlank { "1X2" }
+                val h = container.optString("1").ifBlank { container.optString("home") }
+                val d = container.optString("X").ifBlank { container.optString("draw") }
+                val a = container.optString("2").ifBlank { container.optString("away") }
+                addIfValid(market, h, d, a)
+            }
+        }
+
+        when (root) {
+            is JSONObject -> {
+                val liveMatches = root.optJSONArray("live_matches")
+                if (liveMatches != null) {
+                    for (i in 0 until liveMatches.length()) {
+                        processMatchContainer(liveMatches.optJSONObject(i) ?: continue)
+                    }
+                } else {
+                    processMatchContainer(root)
+                }
+            }
+            is JSONArray -> {
+                for (i in 0 until root.length()) {
+                    val item = root.optJSONObject(i) ?: continue
+                    processMatchContainer(item)
+                }
+            }
+        }
+
+        return oddsList.distinctBy { "${it.market}-${it.homeOdd}-${it.drawOdd}-${it.awayOdd}" }.take(12)
     }
 
     fun parseWeather(rawJson: String): MatchWeatherInfo? {
@@ -314,45 +370,52 @@ object StatPalParsers {
     }
 
     fun parseLineups(rawJson: String): MatchLineupsInfo? {
-        val root = runCatching { JSONTokener(rawJson).nextValue() }.getOrNull() ?: return null
-        val objs = mutableListOf<JSONObject>()
-        extractObjects(root, { it.has("home") && it.has("away") }, objs)
-        val container = objs.firstOrNull() ?: return null
+        val root = runCatching { JSONTokener(rawJson).nextValue() }.getOrNull() as? JSONObject ?: return null
 
-        fun readSide(sideObj: JSONObject?): Pair<String, List<LineupPlayerItem>> {
-            if (sideObj == null) return "-" to emptyList()
-            val formation = sideObj.optString("formation").ifBlank { "-" }
+        fun readPlayers(arr: JSONArray?): List<LineupPlayerItem> {
+            if (arr == null) return emptyList()
             val list = mutableListOf<LineupPlayerItem>()
-            val arr = sideObj.optJSONArray("starting_lineup")
-                ?: sideObj.optJSONArray("players")
-                ?: sideObj.optJSONArray("lineup")
-            if (arr != null) {
-                for (i in 0 until arr.length()) {
-                    val p = arr.optJSONObject(i) ?: continue
-                    val name = p.optString("name").ifBlank { p.optString("player_name") }.trim()
-                    if (name.isNotBlank()) {
-                        list.add(
-                            LineupPlayerItem(
-                                number = p.optString("number").ifBlank { p.optString("shirt_number") }.ifBlank { "•" },
-                                name = name,
-                                position = p.optString("pos").ifBlank { p.optString("position") },
-                                playerId = p.optString("id").ifBlank { p.optString("player_id") }
-                            )
-                        )
-                    }
-                }
+            for (i in 0 until arr.length()) {
+                val p = arr.optJSONObject(i) ?: continue
+                val name = p.optString("name").ifBlank { p.optString("player_name") }.trim()
+                if (name.isBlank()) continue
+                list.add(
+                    LineupPlayerItem(
+                        number = p.optString("number").ifBlank { p.optString("shirt_number") }.ifBlank { "•" },
+                        name = name,
+                        position = p.optString("position").ifBlank { p.optString("pos") }.ifBlank { "player" },
+                        playerId = p.optString("id").ifBlank { p.optString("player_id") }
+                    )
+                )
             }
-            return formation to list
+            return list
         }
 
-        val (hForm, hPlayers) = readSide(container.optJSONObject("home"))
-        val (aForm, aPlayers) = readSide(container.optJSONObject("away"))
-        if (hPlayers.isEmpty() && aPlayers.isEmpty() && hForm == "-" && aForm == "-") return null
+        fun readSide(side: JSONObject?): Triple<String, List<LineupPlayerItem>, List<LineupPlayerItem>> {
+            if (side == null) return Triple("-", emptyList(), emptyList())
+            val formation = side.optString("team_formation").ifBlank { side.optString("formation") }.ifBlank { "-" }
+            val starting = readPlayers(side.optJSONArray("starting_xi") ?: side.optJSONArray("starting_lineup") ?: side.optJSONArray("players"))
+            val bench = readPlayers(side.optJSONArray("bench"))
+            return Triple(formation, starting, bench)
+        }
+
+        val home = root.optJSONObject("home")
+        val away = root.optJSONObject("away")
+        if (home == null && away == null) return null
+
+        val (hForm, hStart, hBench) = readSide(home)
+        val (aForm, aStart, aBench) = readSide(away)
+
         return MatchLineupsInfo(
             homeFormation = hForm,
             awayFormation = aForm,
-            homeStarting = hPlayers,
-            awayStarting = aPlayers
+            homeStarting = hStart,
+            awayStarting = aStart,
+            homeBench = hBench,
+            awayBench = aBench,
+            homeCoach = home?.optJSONObject("coach")?.optString("name").orEmpty(),
+            awayCoach = away?.optJSONObject("coach")?.optString("name").orEmpty(),
+            status = root.optString("status")
         )
     }
 

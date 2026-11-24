@@ -469,31 +469,51 @@ fun MatchDetailScreen(
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("CSAPAT FELÁLLÁSOK", color = AccentColor, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                         val lu = lineups
-                        if (lu == null) {
+                        if (lu == null || (lu.homeStarting.isEmpty() && lu.awayStarting.isEmpty())) {
                             Text("A kezdőcsapatok még nem érhetők el.", color = SecondaryColor, fontSize = 12.sp)
                         } else {
-                            DiagnosticRow("Hazai felállás (${match.homeTeam})", lu.homeFormation, GoldAccent)
-                            lu.homeStarting.forEach { p ->
-                                Text(
-                                    text = "${p.number}. ${p.name} ${if (p.position.isNotBlank()) "(${p.position})" else ""}",
-                                    color = Color.White,
-                                    fontSize = 12.sp,
-                                    modifier = Modifier.clickable(enabled = p.playerId.isNotBlank()) {
-                                        onOpenProfile("player", p.playerId, p.name)
-                                    }
-                                )
+                            if (lu.status.isNotBlank()) {
+                                Text("Státusz: ${lu.status}", color = SecondaryColor, fontSize = 10.sp)
                             }
-                            HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
-                            DiagnosticRow("Vendég felállás (${match.awayTeam})", lu.awayFormation, GoldAccent)
-                            lu.awayStarting.forEach { p ->
-                                Text(
-                                    text = "${p.number}. ${p.name} ${if (p.position.isNotBlank()) "(${p.position})" else ""}",
-                                    color = Color.White,
-                                    fontSize = 12.sp,
-                                    modifier = Modifier.clickable(enabled = p.playerId.isNotBlank()) {
-                                        onOpenProfile("player", p.playerId, p.name)
-                                    }
+                            if (lu.homeStarting.isNotEmpty()) {
+                                PitchLineupView(
+                                    formation = lu.homeFormation,
+                                    players = lu.homeStarting,
+                                    teamName = match.homeTeam,
+                                    isHome = true,
+                                    modifier = Modifier.fillMaxWidth()
                                 )
+                                if (lu.homeCoach.isNotBlank()) {
+                                    Text("Edző: ${lu.homeCoach}", color = SecondaryColor, fontSize = 10.sp)
+                                }
+                                Spacer(Modifier.height(10.dp))
+                            }
+                            if (lu.awayStarting.isNotEmpty()) {
+                                PitchLineupView(
+                                    formation = lu.awayFormation,
+                                    players = lu.awayStarting,
+                                    teamName = match.awayTeam,
+                                    isHome = false,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                if (lu.awayCoach.isNotBlank()) {
+                                    Text("Edző: ${lu.awayCoach}", color = SecondaryColor, fontSize = 10.sp)
+                                }
+                            }
+                            // Bench lists
+                            if (lu.homeBench.isNotEmpty() || lu.awayBench.isNotEmpty()) {
+                                HorizontalDivider(color = Color.White.copy(alpha = 0.12f), modifier = Modifier.padding(vertical = 8.dp))
+                                Text("CSERÉK", color = SecondaryColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                (lu.homeBench + lu.awayBench).take(12).forEach { p ->
+                                    Text(
+                                        text = "${p.number}. ${p.name}",
+                                        color = Color.White.copy(alpha = 0.85f),
+                                        fontSize = 11.sp,
+                                        modifier = Modifier.clickable(enabled = p.playerId.isNotBlank()) {
+                                            onOpenProfile("player", p.playerId, p.name)
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
