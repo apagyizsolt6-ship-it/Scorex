@@ -138,8 +138,10 @@ fun LeagueHubScreen(
                         fontWeight = FontWeight.Black
                     )
                     if (seasons.isNotEmpty()) {
+                        val display = seasons.take(8).joinToString(", ")
+                        val more = if (seasons.size > 8) " (+${seasons.size - 8})" else ""
                         Text(
-                            text = "Szezonok: ${seasons.take(6).joinToString(", ")}",
+                            text = "Szezonok: $display$more",
                             color = CyanAccent,
                             fontSize = 11.sp
                         )

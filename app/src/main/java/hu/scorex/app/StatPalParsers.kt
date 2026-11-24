@@ -121,28 +121,53 @@ object StatPalParsers {
     fun parseSeasons(rawJson: String): List<String> {
         val root = runCatching { JSONTokener(rawJson).nextValue() }.getOrNull() ?: return emptyList()
         val seasons = linkedSetOf<String>()
+
+        fun extractYear(s: String): String? {
+            val trimmed = s.trim()
+            // Prefer pure 4-digit year or "2023/2024" style
+            val pureYear = Regex("^20\\d{2}$").find(trimmed)
+            if (pureYear != null) return pureYear.value
+            val range = Regex("(20\\d{2})/(20\\d{2})").find(trimmed)
+            if (range != null) return range.value
+            val anyYear = Regex("20\\d{2}").find(trimmed)
+            return anyYear?.value
+        }
+
         fun walk(v: Any?) {
             when (v) {
                 is JSONObject -> {
-                    val s = v.optString("season").ifBlank { v.optString("name") }.trim()
-                    if (s.matches(Regex(".*20\\d{2}.*"))) seasons.add(s)
+                    // Prefer explicit season/name fields
+                    listOf("season", "name", "year").forEach { key ->
+                        val s = v.optString(key).trim()
+                        if (s.isNotBlank() && !s.startsWith("{") && !s.startsWith("[")) {
+                            extractYear(s)?.let { seasons.add(it) }
+                        }
+                    }
                     val it = v.keys()
                     while (it.hasNext()) walk(v.opt(it.next()))
                 }
                 is JSONArray -> {
                     for (i in 0 until v.length()) {
                         val item = v.opt(i)
-                        if (item is String && item.matches(Regex(".*20\\d{2}.*"))) {
-                            seasons.add(item.trim())
-                        } else {
-                            walk(item)
+                        when (item) {
+                            is String -> {
+                                if (!item.trim().startsWith("{") && !item.trim().startsWith("[")) {
+                                    extractYear(item)?.let { seasons.add(it) }
+                                }
+                            }
+                            else -> walk(item)
                         }
+                    }
+                }
+                is String -> {
+                    if (!v.trim().startsWith("{") && !v.trim().startsWith("[")) {
+                        extractYear(v)?.let { seasons.add(it) }
                     }
                 }
             }
         }
         walk(root)
-        return seasons.toList()
+        return seasons.toList().sortedDescending()
     }
 
     fun parseLeagueStats(leagueId: String, leagueTitle: String, statsJson: String, matchesStatsJson: String): LeagueStatsSummary {
