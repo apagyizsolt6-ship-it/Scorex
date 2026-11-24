@@ -43,14 +43,14 @@ private val AccentPalette = listOf(
 
 private enum class LeagueFilter(val label: String) {
     ALL("Mind"),
-    FAVORITES("Kedvencek"),
+    FAVORITES("Kedvenc"),
     LIVE("Élő"),
-    FINISHED("Befejezett")
+    TIPS("Tippes"),
+    FINISHED("Kész")
 }
 
 fun isMatchLive(match: ScorexMatch): Boolean {
-    val finished = match.matchTime.equals("FT", ignoreCase = true) ||
-        match.rawStatus.equals("FT", ignoreCase = true)
+    val finished = isMatchFinished(match)
     if (finished) return false
     return match.matchTime.equals("ÉLŐ", ignoreCase = true) ||
         match.matchTime.equals("HT", ignoreCase = true) ||
@@ -62,13 +62,31 @@ fun isMatchLive(match: ScorexMatch): Boolean {
 
 fun isMatchFinished(match: ScorexMatch): Boolean {
     return match.matchTime.equals("FT", ignoreCase = true) ||
-        match.rawStatus.equals("FT", ignoreCase = true)
+        match.matchTime.equals("AET", ignoreCase = true) ||
+        match.matchTime.equals("PEN", ignoreCase = true) ||
+        match.rawStatus.equals("FT", ignoreCase = true) ||
+        match.rawStatus.equals("AET", ignoreCase = true) ||
+        match.rawStatus.equals("PEN", ignoreCase = true)
 }
 
 private fun matchSortRank(match: ScorexMatch): Int = when {
     isMatchLive(match) -> 0
     !isMatchFinished(match) -> 1
     else -> 2
+}
+
+private fun matchTimeSortKey(match: ScorexMatch): Int {
+    val minuteMatch = Regex("^(\\d+)").find(match.matchTime.trim())
+    if (minuteMatch != null) {
+        return minuteMatch.groupValues[1].toIntOrNull() ?: 999
+    }
+    val clockMatch = Regex("^(\\d{1,2}):(\\d{2})$").matchEntire(match.matchTime.trim())
+    if (clockMatch != null) {
+        val h = clockMatch.groupValues[1].toIntOrNull() ?: 99
+        val m = clockMatch.groupValues[2].toIntOrNull() ?: 99
+        return h * 60 + m
+    }
+    return 9999
 }
 
 private fun accentColorForLeague(
@@ -82,6 +100,11 @@ private fun accentColorForLeague(
     if (key.startsWith("nemzetközi") || key.startsWith("világ")) return LeaguePurple
     val idx = (key.hashCode() and Int.MAX_VALUE) % AccentPalette.size
     return AccentPalette[idx]
+}
+
+private fun hasTipForMatch(match: ScorexMatch, savedTips: List<String>): Boolean {
+    val prefix = "${match.homeTeam} – ${match.awayTeam}: "
+    return savedTips.any { it.startsWith(prefix, ignoreCase = true) }
 }
 
 @Composable
@@ -118,20 +141,20 @@ fun LeagueSection(
     matches: List<ScorexMatch>,
     preferences: SharedPreferences,
     savedTips: List<String> = emptyList(),
+    selectedLeagueKey: String? = null,
+    onClearSelectedLeague: () -> Unit = {},
     onSelectMatch: (ScorexMatch) -> Unit = {}
 ) {
     val favorites = remember {
         mutableStateListOf<String>().apply {
             addAll(
-                preferences.getStringSet(
-                    "favorite_leagues",
-                    emptySet()
-                ) ?: emptySet()
+                preferences.getStringSet("favorite_leagues", emptySet())
+                    ?: emptySet()
             )
         }
     }
 
-    LaunchedEffect(preferences) {
+    DisposableEffect(preferences) {
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
             if (key == "favorite_leagues") {
                 val updated = prefs.getStringSet("favorite_leagues", emptySet()).orEmpty()
@@ -140,6 +163,9 @@ fun LeagueSection(
             }
         }
         preferences.registerOnSharedPreferenceChangeListener(listener)
+        onDispose {
+            preferences.unregisterOnSharedPreferenceChangeListener(listener)
+        }
     }
 
     fun persistFavorites() {
@@ -148,21 +174,10 @@ fun LeagueSection(
             .apply()
     }
 
-    val expandedStates = remember {
-        mutableStateMapOf<String, Boolean>()
-    }
-
-    var searchQuery by remember {
-        mutableStateOf("")
-    }
-
-    var activeFilter by remember {
-        mutableStateOf(LeagueFilter.ALL)
-    }
-
-    var showFavoritesManager by remember {
-        mutableStateOf(false)
-    }
+    val expandedStates = remember { mutableStateMapOf<String, Boolean>() }
+    var searchQuery by remember { mutableStateOf("") }
+    var activeFilter by remember { mutableStateOf(LeagueFilter.ALL) }
+    var showFavoritesManager by remember { mutableStateOf(false) }
 
     val hungarianCollator = remember {
         Collator.getInstance(Locale("hu", "HU")).apply {
@@ -170,16 +185,26 @@ fun LeagueSection(
         }
     }
 
-    val filteredMatches = remember(matches, searchQuery, activeFilter, favorites.toList()) {
+    val filteredMatches = remember(
+        matches,
+        searchQuery,
+        activeFilter,
+        favorites.toList(),
+        savedTips.toList(),
+        selectedLeagueKey
+    ) {
         val q = searchQuery.trim().lowercase(Locale("hu", "HU"))
         matches.filter { match ->
             val leagueKey = match.league.ifBlank { "Ismeretlen bajnokság" }
             val translatedLeague = translateLeagueName(leagueKey).lowercase(Locale("hu", "HU"))
 
+            val matchesSelectedLeague = selectedLeagueKey == null || leagueKey == selectedLeagueKey
+
             val matchesFilter = when (activeFilter) {
                 LeagueFilter.ALL -> true
                 LeagueFilter.FAVORITES -> leagueKey in favorites
                 LeagueFilter.LIVE -> isMatchLive(match)
+                LeagueFilter.TIPS -> hasTipForMatch(match, savedTips)
                 LeagueFilter.FINISHED -> isMatchFinished(match)
             }
 
@@ -189,7 +214,7 @@ fun LeagueSection(
                 match.homeTeam.lowercase(Locale("hu", "HU")).contains(q) ||
                 match.awayTeam.lowercase(Locale("hu", "HU")).contains(q)
 
-            matchesFilter && matchesSearch
+            matchesSelectedLeague && matchesFilter && matchesSearch
         }
     }
 
@@ -199,6 +224,7 @@ fun LeagueSection(
             .mapValues { (_, leagueList) ->
                 leagueList.sortedWith(
                     compareBy<ScorexMatch> { matchSortRank(it) }
+                        .thenBy { matchTimeSortKey(it) }
                         .thenBy { it.matchTime }
                         .thenBy { it.homeTeam }
                 )
@@ -223,9 +249,41 @@ fun LeagueSection(
         expandedStates[entry.key] ?: true
     }
 
-    Column(
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+
+        if (selectedLeagueKey != null) {
+            LeagueGlassCard(
+                borderColor = LeagueGold.copy(alpha = 0.5f),
+                gradientColors = listOf(LeagueGold.copy(alpha = 0.16f), GlassBase)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "★ Szűrt liga: ${translateLeagueName(selectedLeagueKey)}",
+                        color = LeagueGold,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = "ÖSSZES LIGA",
+                        color = LeagueCyan,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(7.dp))
+                            .background(GlassDark)
+                            .clickable { onClearSelectedLeague() }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+        }
 
         LeagueGlassCard(
             borderColor = LeagueCyan.copy(alpha = 0.34f),
@@ -274,7 +332,7 @@ fun LeagueSection(
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     LeagueFilter.entries.forEach { filter ->
                         val selected = activeFilter == filter
@@ -282,7 +340,8 @@ fun LeagueSection(
                             LeagueFilter.ALL -> LeagueCyan
                             LeagueFilter.FAVORITES -> LeagueGold
                             LeagueFilter.LIVE -> LeagueGreen
-                            LeagueFilter.FINISHED -> LeaguePurple
+                            LeagueFilter.TIPS -> LeaguePurple
+                            LeagueFilter.FINISHED -> LeagueCoral
                         }
 
                         Box(
@@ -305,7 +364,7 @@ fun LeagueSection(
                             Text(
                                 text = filter.label,
                                 color = if (selected) chipColor else LeagueText,
-                                fontSize = 11.sp,
+                                fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -368,6 +427,9 @@ fun LeagueSection(
                                             .clickable {
                                                 favorites.remove(favLeague)
                                                 persistFavorites()
+                                                if (selectedLeagueKey == favLeague) {
+                                                    onClearSelectedLeague()
+                                                }
                                             }
                                             .padding(horizontal = 4.dp)
                                     )
@@ -393,11 +455,16 @@ fun LeagueSection(
                         color = LeagueText,
                         fontSize = 12.sp
                     )
-                    if (searchQuery.isNotBlank() || activeFilter != LeagueFilter.ALL) {
+                    if (
+                        searchQuery.isNotBlank() ||
+                        activeFilter != LeagueFilter.ALL ||
+                        selectedLeagueKey != null
+                    ) {
                         OutlinedButton(
                             onClick = {
                                 searchQuery = ""
                                 activeFilter = LeagueFilter.ALL
+                                onClearSelectedLeague()
                             },
                             shape = RoundedCornerShape(9.dp)
                         ) {
@@ -437,17 +504,12 @@ fun LeagueSection(
                         .background(LeagueGreen.copy(alpha = 0.20f)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = "⚽",
-                        fontSize = 16.sp
-                    )
+                    Text(text = "⚽", fontSize = 16.sp)
                 }
 
                 Spacer(Modifier.width(10.dp))
 
-                Column(
-                    modifier = Modifier.weight(1f)
-                ) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Összes bajnokság (${sortedEntries.size})",
                         color = Color.White,
@@ -494,9 +556,7 @@ fun LeagueSection(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable {
-                            expandedStates[league] = !expanded
-                        }
+                        .clickable { expandedStates[league] = !expanded }
                         .padding(end = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -526,9 +586,7 @@ fun LeagueSection(
 
                     Spacer(Modifier.width(9.dp))
 
-                    Column(
-                        modifier = Modifier.weight(1f)
-                    ) {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = translatedLeague,
                             color = if (isFavorite) LeagueGold else Color.White,
@@ -599,6 +657,9 @@ fun LeagueSection(
                             .clickable {
                                 if (isFavorite) {
                                     favorites.remove(league)
+                                    if (selectedLeagueKey == league) {
+                                        onClearSelectedLeague()
+                                    }
                                 } else {
                                     favorites.add(league)
                                 }
@@ -625,11 +686,9 @@ fun LeagueSection(
                         verticalArrangement = Arrangement.spacedBy(7.dp)
                     ) {
                         leagueMatches.forEach { match ->
-                            val prefix = "${match.homeTeam} – ${match.awayTeam}: "
-                            val hasTip = savedTips.any { it.startsWith(prefix, ignoreCase = true) }
                             LiveMatchCard(
                                 match = match,
-                                hasSavedTip = hasTip,
+                                hasSavedTip = hasTipForMatch(match, savedTips),
                                 onClick = { onSelectMatch(match) }
                             )
                         }
