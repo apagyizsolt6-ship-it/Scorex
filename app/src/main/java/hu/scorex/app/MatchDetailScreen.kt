@@ -25,8 +25,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+private enum class MatchDetailTab(val label: String) {
+    OVERVIEW("Áttekintés"),
+    H2H_PRED("H2H & Tipp"),
+    LINEUPS("Felállás & Hiányzók"),
+    ODDS_WEATHER("Szorzók & Időjárás")
+}
 
 @Composable
 fun MatchDetailScreen(
@@ -34,17 +40,60 @@ fun MatchDetailScreen(
     preferences: SharedPreferences,
     savedTips: List<String>,
     onToggleTip: (String) -> Unit,
+    onOpenProfile: (kind: String, id: String, title: String) -> Unit = { _, _, _ -> },
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val apiKey = remember(preferences) {
         preferences.getString("statpal_api_key", "").orEmpty()
     }
 
-    var v2EndpointInput by remember { mutableStateOf("standings") }
-    var v2ResponseText by remember { mutableStateOf("") }
-    var isFetchingV2 by remember { mutableStateOf(false) }
+    var activeTab by remember { mutableStateOf(MatchDetailTab.OVERVIEW) }
+
+    var prediction by remember(match.id) { mutableStateOf<MatchPredictionInfo?>(null) }
+    var h2hList by remember(match.id) { mutableStateOf<List<String>>(emptyList()) }
+    var lineups by remember(match.id) { mutableStateOf<MatchLineupsInfo?>(null) }
+    var injuries by remember(match.id) { mutableStateOf<List<InjuryItem>>(emptyList()) }
+    var odds by remember(match.id) { mutableStateOf<List<MatchOddsItem>>(emptyList()) }
+    var weather by remember(match.id) { mutableStateOf<MatchWeatherInfo?>(null) }
+    var isLoadingTab by remember(match.id, activeTab) { mutableStateOf(false) }
+
+    LaunchedEffect(match.id, activeTab, apiKey) {
+        if (apiKey.isBlank()) return@LaunchedEffect
+        when (activeTab) {
+            MatchDetailTab.H2H_PRED -> {
+                if (prediction == null && h2hList.isEmpty()) {
+                    isLoadingTab = true
+                    withContext(Dispatchers.IO) {
+                        prediction = runCatching { StatPalApi.fetchMatchPrediction(apiKey, match.id) }.getOrNull()
+                        h2hList = runCatching { StatPalApi.fetchMatchH2H(apiKey, match) }.getOrDefault(emptyList())
+                    }
+                    isLoadingTab = false
+                }
+            }
+            MatchDetailTab.LINEUPS -> {
+                if (lineups == null && injuries.isEmpty()) {
+                    isLoadingTab = true
+                    withContext(Dispatchers.IO) {
+                        lineups = runCatching { StatPalApi.fetchMatchLineups(apiKey, match.id) }.getOrNull()
+                        injuries = runCatching { StatPalApi.fetchMatchInjuries(apiKey, match) }.getOrDefault(emptyList())
+                    }
+                    isLoadingTab = false
+                }
+            }
+            MatchDetailTab.ODDS_WEATHER -> {
+                if (odds.isEmpty() && weather == null) {
+                    isLoadingTab = true
+                    withContext(Dispatchers.IO) {
+                        odds = runCatching { StatPalApi.fetchMatchLiveOdds(apiKey, match) }.getOrDefault(emptyList())
+                        weather = runCatching { StatPalApi.fetchMatchWeather(apiKey, match.id) }.getOrNull()
+                    }
+                    isLoadingTab = false
+                }
+            }
+            MatchDetailTab.OVERVIEW -> Unit
+        }
+    }
 
     val live = isMatchLive(match)
     val finished = isMatchFinished(match)
@@ -53,6 +102,8 @@ fun MatchDetailScreen(
 
     val homeKey = favoriteTeamKey(match.homeTeam)
     val awayKey = favoriteTeamKey(match.awayTeam)
+    val resolvedHomeId = StatPalApi.resolveTeamId(match.homeTeam, match.homeTeamId)
+    val resolvedAwayId = StatPalApi.resolveTeamId(match.awayTeam, match.awayTeamId)
 
     var isLeagueFavorite by remember(leagueKey, preferences) {
         mutableStateOf(
@@ -70,27 +121,20 @@ fun MatchDetailScreen(
         val key = favoriteTeamKey(teamName)
         if (key.isBlank()) return
         val updated = favoriteTeams.toMutableSet()
-        if (key in updated) {
-            updated.remove(key)
-        } else {
-            updated.add(key)
-        }
+        if (key in updated) updated.remove(key) else updated.add(key)
         preferences.edit().putStringSet("favorite_teams", updated).apply()
         favoriteTeams = updated
     }
 
     val homeGoalsInt = match.homeScore.toIntOrNull()
     val awayGoalsInt = match.awayScore.toIntOrNull()
-
     val currentOutcomePrefix = if (homeGoalsInt != null && awayGoalsInt != null) {
         when {
             homeGoalsInt > awayGoalsInt -> "1 ("
             awayGoalsInt > homeGoalsInt -> "2 ("
             else -> "X ("
         }
-    } else {
-        null
-    }
+    } else null
 
     val extraNote = when {
         match.matchTime.equals("AET", true) || match.rawStatus.equals("AET", true) -> " (hosszabbítás után)"
@@ -138,14 +182,8 @@ fun MatchDetailScreen(
 
             OutlinedButton(
                 onClick = {
-                    val current = preferences.getStringSet("favorite_leagues", emptySet())
-                        .orEmpty()
-                        .toMutableSet()
-                    if (isLeagueFavorite) {
-                        current.remove(leagueKey)
-                    } else {
-                        current.add(leagueKey)
-                    }
+                    val current = preferences.getStringSet("favorite_leagues", emptySet()).orEmpty().toMutableSet()
+                    if (isLeagueFavorite) current.remove(leagueKey) else current.add(leagueKey)
                     preferences.edit().putStringSet("favorite_leagues", current).apply()
                     isLeagueFavorite = !isLeagueFavorite
                 },
@@ -183,10 +221,7 @@ fun MatchDetailScreen(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(50))
-                            .background(
-                                if (live) AccentColor.copy(alpha = 0.22f)
-                                else CyanAccent.copy(alpha = 0.16f)
-                            )
+                            .background(if (live) AccentColor.copy(alpha = 0.22f) else CyanAccent.copy(alpha = 0.16f))
                             .padding(horizontal = 10.dp, vertical = 3.dp)
                     ) {
                         Text(
@@ -198,11 +233,7 @@ fun MatchDetailScreen(
                     }
 
                     if (match.date.isNotBlank()) {
-                        Text(
-                            text = match.date,
-                            color = SecondaryColor,
-                            fontSize = 11.sp
-                        )
+                        Text(text = match.date, color = SecondaryColor, fontSize = 11.sp)
                     }
                 }
 
@@ -215,7 +246,11 @@ fun MatchDetailScreen(
                         color = Color.White,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable(enabled = resolvedHomeId.isNotBlank()) {
+                                onOpenProfile("team", resolvedHomeId, match.homeTeam)
+                            }
                     )
 
                     Text(
@@ -232,7 +267,11 @@ fun MatchDetailScreen(
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         textAlign = TextAlign.End,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable(enabled = resolvedAwayId.isNotBlank()) {
+                                onOpenProfile("team", resolvedAwayId, match.awayTeam)
+                            }
                     )
                 }
 
@@ -248,11 +287,7 @@ fun MatchDetailScreen(
                             .weight(1f)
                             .clip(RoundedCornerShape(9.dp))
                             .background(if (isHomeFav) GoldAccent.copy(alpha = 0.18f) else GlassWell)
-                            .border(
-                                width = 1.dp,
-                                color = if (isHomeFav) GoldAccent else Color.White.copy(alpha = 0.10f),
-                                shape = RoundedCornerShape(9.dp)
-                            )
+                            .border(1.dp, if (isHomeFav) GoldAccent else Color.White.copy(alpha = 0.10f), RoundedCornerShape(9.dp))
                             .clickable { toggleTeamFavorite(match.homeTeam) }
                             .padding(horizontal = 8.dp, vertical = 6.dp),
                         contentAlignment = Alignment.Center
@@ -270,11 +305,7 @@ fun MatchDetailScreen(
                             .weight(1f)
                             .clip(RoundedCornerShape(9.dp))
                             .background(if (isAwayFav) GoldAccent.copy(alpha = 0.18f) else GlassWell)
-                            .border(
-                                width = 1.dp,
-                                color = if (isAwayFav) GoldAccent else Color.White.copy(alpha = 0.10f),
-                                shape = RoundedCornerShape(9.dp)
-                            )
+                            .border(1.dp, if (isAwayFav) GoldAccent else Color.White.copy(alpha = 0.10f), RoundedCornerShape(9.dp))
                             .clickable { toggleTeamFavorite(match.awayTeam) }
                             .padding(horizontal = 8.dp, vertical = 6.dp),
                         contentAlignment = Alignment.Center
@@ -288,143 +319,247 @@ fun MatchDetailScreen(
                     }
                 }
 
-                HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
-
-                Text(
-                    text = summaryText,
-                    color = SecondaryColor,
-                    fontSize = 12.sp,
-                    lineHeight = 17.sp
-                )
-            }
-        }
-
-        GlassPanel(
-            borderColor = AccentColor.copy(alpha = 0.25f),
-            gradientColors = listOf(GlassSurface, GlassWell)
-        ) {
-            Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text(
-                    text = "MÉRKŐZÉS ADATAI",
-                    color = AccentColor,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                DiagnosticRow(label = "Eredeti bajnokság", value = match.league)
-                DiagnosticRow(label = "Állapot / Kezdés (helyi)", value = match.matchTime, valueColor = AccentColor)
-                if (match.rawKickoff.isNotBlank()) {
-                    DiagnosticRow(label = "API kezdési idő (UTC)", value = match.rawKickoff)
-                }
-                if (match.rawStatus.isNotBlank()) {
-                    DiagnosticRow(label = "API státuszkód", value = match.rawStatus)
-                }
-                if (match.date.isNotBlank()) {
-                    DiagnosticRow(label = "Dátum", value = match.date)
-                }
-                DiagnosticRow(label = "Azonosító", value = match.id)
-            }
-        }
-
-        GlassPanel(
-            borderColor = CyanAccent.copy(alpha = 0.30f),
-            gradientColors = listOf(GlassSurface, GlassWell)
-        ) {
-            Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = "STATPAL SOCCER V2 VÉGPONT LEKÉRDEZÉS",
-                    color = CyanAccent,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf("standings", "matches/live").forEach { preset ->
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(
-                                    if (v2EndpointInput == preset) CyanAccent.copy(alpha = 0.22f)
-                                    else GlassSurface
-                                )
-                                .border(
-                                    width = 1.dp,
-                                    color = if (v2EndpointInput == preset) CyanAccent else Color.White.copy(alpha = 0.12f),
-                                    shape = RoundedCornerShape(8.dp)
-                                )
-                                .clickable { v2EndpointInput = preset }
-                                .padding(horizontal = 9.dp, vertical = 5.dp)
-                        ) {
-                            Text(
-                                text = preset,
-                                color = if (v2EndpointInput == preset) CyanAccent else SecondaryColor,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                if (resolvedHomeId.isNotBlank() || resolvedAwayId.isNotBlank()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (resolvedHomeId.isNotBlank()) {
+                            OutlinedButton(
+                                onClick = { onOpenProfile("team", resolvedHomeId, match.homeTeam) },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(9.dp),
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text("Hazai csapatprofil →", color = CyanAccent, fontSize = 10.sp)
+                            }
+                        }
+                        if (resolvedAwayId.isNotBlank()) {
+                            OutlinedButton(
+                                onClick = { onOpenProfile("team", resolvedAwayId, match.awayTeam) },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(9.dp),
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text("Vendég csapatprofil →", color = CyanAccent, fontSize = 10.sp)
+                            }
                         }
                     }
                 }
 
-                OutlinedTextField(
-                    value = v2EndpointInput,
-                    onValueChange = { v2EndpointInput = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    label = { Text("v2 végpont (/api/v2/soccer/...)") },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = GlassSurface,
-                        unfocusedContainerColor = GlassSurface,
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = CyanAccent,
-                        unfocusedBorderColor = Color.White.copy(alpha = 0.15f)
-                    )
-                )
+                HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
 
-                Button(
-                    onClick = {
-                        if (apiKey.isBlank()) {
-                            v2ResponseText = "Előbb állítsd be a StatPal API-kulcsot a Beállításokban."
-                        } else if (!isFetchingV2) {
-                            isFetchingV2 = true
-                            scope.launch {
-                                v2ResponseText = withContext(Dispatchers.IO) {
-                                    try {
-                                        StatPalApi.fetchSoccerV2Endpoint(
-                                            apiKey = apiKey,
-                                            relativePath = v2EndpointInput,
-                                            extraQuery = mapOf("match_id" to match.id)
-                                        ).take(4000)
-                                    } catch (e: Exception) {
-                                        e.message ?: "Hiba a v2 lekérdezés során."
-                                    }
-                                }
-                                isFetchingV2 = false
-                            }
-                        }
-                    },
-                    enabled = !isFetchingV2,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = CyanAccent,
-                        contentColor = BackgroundColor
-                    )
+                Text(text = summaryText, color = SecondaryColor, fontSize = 12.sp, lineHeight = 17.sp)
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            MatchDetailTab.entries.forEach { tab ->
+                val selected = activeTab == tab
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(if (selected) AccentColor.copy(alpha = 0.22f) else GlassWell)
+                        .border(1.dp, if (selected) AccentColor else Color.White.copy(alpha = 0.10f), RoundedCornerShape(9.dp))
+                        .clickable { activeTab = tab }
+                        .padding(vertical = 7.dp, horizontal = 4.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text(if (isFetchingV2) "LEKÉRDEZÉS..." else "V2 VÉGPONT LEKÉRÉSE")
+                    Text(
+                        text = tab.label,
+                        color = if (selected) AccentColor else SecondaryColor,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
+
+        if (isLoadingTab) {
+            GlassPanel(
+                borderColor = CyanAccent.copy(alpha = 0.25f),
+                gradientColors = listOf(GlassSurface, GlassWell)
+            ) {
+                Text(
+                    text = "Adatok betöltése a StatPal v2-ből...",
+                    color = CyanAccent,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(14.dp)
+                )
+            }
+        }
+
+        when (activeTab) {
+            MatchDetailTab.OVERVIEW -> {
+                GlassPanel(
+                    borderColor = AccentColor.copy(alpha = 0.25f),
+                    gradientColors = listOf(GlassSurface, GlassWell)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "MÉRKŐZÉS ADATAI",
+                            color = AccentColor,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        DiagnosticRow(label = "Eredeti bajnokság", value = match.league)
+                        DiagnosticRow(label = "Állapot / Kezdés (helyi)", value = match.matchTime, valueColor = AccentColor)
+                        if (match.rawKickoff.isNotBlank()) {
+                            DiagnosticRow(label = "API kezdési idő (UTC)", value = match.rawKickoff)
+                        }
+                        if (match.rawStatus.isNotBlank()) {
+                            DiagnosticRow(label = "API státuszkód", value = match.rawStatus)
+                        }
+                        if (match.date.isNotBlank()) {
+                            DiagnosticRow(label = "Dátum", value = match.date)
+                        }
+                        DiagnosticRow(label = "Azonosító", value = match.id)
+                    }
+                }
+            }
+
+            MatchDetailTab.H2H_PRED -> {
+                GlassPanel(
+                    borderColor = PurpleAccent.copy(alpha = 0.35f),
+                    gradientColors = listOf(PurpleAccent.copy(alpha = 0.14f), GlassSurface)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("ELŐREJELZÉS & ESÉLYEK", color = PurpleAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        val pred = prediction
+                        if (pred == null) {
+                            Text("Ehhez a mérkőzéshez jelenleg nincs előrejelzési adat.", color = SecondaryColor, fontSize = 12.sp)
+                        } else {
+                            DiagnosticRow("Esélyesebb kimenetel", pred.favoriteSide, AccentColor)
+                            DiagnosticRow("Hazai (1) / Döntetlen (X) / Vendég (2)", "${pred.homeWinProb} • ${pred.drawProb} • ${pred.awayWinProb}")
+                            Text("Javaslat: ${pred.advice}", color = Color.White, fontSize = 12.sp)
+                        }
+                    }
                 }
 
-                if (v2ResponseText.isNotBlank()) {
-                    Text(
-                        text = v2ResponseText,
-                        color = Color.White,
-                        fontSize = 11.sp,
-                        lineHeight = 15.sp
-                    )
+                GlassPanel(
+                    borderColor = CyanAccent.copy(alpha = 0.30f),
+                    gradientColors = listOf(GlassSurface, GlassWell)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("EGMÁS ELLENI (H2H)", color = CyanAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        if (h2hList.isEmpty()) {
+                            Text("Nincs elérhető H2H előzmény ehhez a párosításhoz.", color = SecondaryColor, fontSize = 12.sp)
+                        } else {
+                            h2hList.forEach { row ->
+                                Text("• $row", color = Color.White, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
+            MatchDetailTab.LINEUPS -> {
+                GlassPanel(
+                    borderColor = AccentColor.copy(alpha = 0.30f),
+                    gradientColors = listOf(GlassSurface, GlassWell)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("CSAPAT FELÁLLÁSOK", color = AccentColor, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        val lu = lineups
+                        if (lu == null) {
+                            Text("A kezdőcsapatok még nem érhetők el.", color = SecondaryColor, fontSize = 12.sp)
+                        } else {
+                            DiagnosticRow("Hazai felállás (${match.homeTeam})", lu.homeFormation, GoldAccent)
+                            lu.homeStarting.forEach { p ->
+                                Text(
+                                    text = "${p.number}. ${p.name} ${if (p.position.isNotBlank()) "(${p.position})" else ""}",
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.clickable(enabled = p.playerId.isNotBlank()) {
+                                        onOpenProfile("player", p.playerId, p.name)
+                                    }
+                                )
+                            }
+                            HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
+                            DiagnosticRow("Vendég felállás (${match.awayTeam})", lu.awayFormation, GoldAccent)
+                            lu.awayStarting.forEach { p ->
+                                Text(
+                                    text = "${p.number}. ${p.name} ${if (p.position.isNotBlank()) "(${p.position})" else ""}",
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.clickable(enabled = p.playerId.isNotBlank()) {
+                                        onOpenProfile("player", p.playerId, p.name)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                GlassPanel(
+                    borderColor = WarningColor.copy(alpha = 0.30f),
+                    gradientColors = listOf(GlassSurface, GlassWell)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("SÉRÜLÉSEK ÉS ELTILTÁSOK", color = WarningColor, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        if (injuries.isEmpty()) {
+                            Text("Nincs jelentett sérült vagy eltiltott játékos.", color = SecondaryColor, fontSize = 12.sp)
+                        } else {
+                            injuries.forEach { inj ->
+                                Text(
+                                    text = "• ${inj.playerName}${if (inj.team.isNotBlank()) " (${inj.team})" else ""}: ${inj.reason} [${inj.status}]",
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.clickable(enabled = inj.playerId.isNotBlank()) {
+                                        onOpenProfile("player", inj.playerId, inj.playerName)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            MatchDetailTab.ODDS_WEATHER -> {
+                GlassPanel(
+                    borderColor = GoldAccent.copy(alpha = 0.30f),
+                    gradientColors = listOf(GlassSurface, GlassWell)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("SZORZÓK (ÉLŐ / MECCS ELŐTTI)", color = GoldAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        if (odds.isEmpty()) {
+                            Text("Ehhez a mérkőzéshez jelenleg nincs elérhető szorzó.", color = SecondaryColor, fontSize = 12.sp)
+                        } else {
+                            odds.forEach { item ->
+                                DiagnosticRow(
+                                    label = item.market,
+                                    value = "1: ${item.homeOdd}  |  X: ${item.drawOdd}  |  2: ${item.awayOdd}",
+                                    valueColor = GoldAccent
+                                )
+                            }
+                        }
+                    }
+                }
+
+                GlassPanel(
+                    borderColor = CyanAccent.copy(alpha = 0.30f),
+                    gradientColors = listOf(GlassSurface, GlassWell)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("HELYSZÍNI IDŐJÁRÁS", color = CyanAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        val w = weather
+                        if (w == null) {
+                            Text("Nincs elérhető időjárás-előrejelzés ehhez a meccshez.", color = SecondaryColor, fontSize = 12.sp)
+                        } else {
+                            DiagnosticRow("Időjárás", w.condition, Color.White)
+                            DiagnosticRow("Hőmérséklet", w.temperature, AccentColor)
+                            DiagnosticRow("Szél", w.wind)
+                            DiagnosticRow("Páratartalom", w.humidity)
+                        }
+                    }
                 }
             }
         }
@@ -499,15 +634,8 @@ fun MatchDetailScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(11.dp))
-                            .background(
-                                if (isSaved) GoldAccent.copy(alpha = 0.20f)
-                                else GlassWell
-                            )
-                            .border(
-                                width = 1.dp,
-                                color = if (isSaved) GoldAccent else Color.White.copy(alpha = 0.10f),
-                                shape = RoundedCornerShape(11.dp)
-                            )
+                            .background(if (isSaved) GoldAccent.copy(alpha = 0.20f) else GlassWell)
+                            .border(1.dp, if (isSaved) GoldAccent else Color.White.copy(alpha = 0.10f), RoundedCornerShape(11.dp))
                             .clickable { onToggleTip(fullTip) }
                             .padding(horizontal = 12.dp, vertical = 9.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -543,10 +671,7 @@ fun MatchDetailScreen(
         Button(
             onClick = onBack,
             modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = AccentColor,
-                contentColor = BackgroundColor
-            )
+            colors = ButtonDefaults.buttonColors(containerColor = AccentColor, contentColor = BackgroundColor)
         ) {
             Text("VISSZA A MÉRKŐZÉSEKHEZ")
         }
