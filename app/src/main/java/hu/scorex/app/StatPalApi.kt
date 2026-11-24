@@ -210,14 +210,9 @@ object StatPalApi {
             lastParsedMatchCount = matches.size
             lastMatchCount = matches.size
 
-            lastDuplicateMatchCount =
-                stats.duplicateCount
-
-            lastMissingTeamCount =
-                stats.missingTeamCount
-
-            lastInvalidMatchCount =
-                stats.invalidCount
+            lastDuplicateMatchCount = stats.duplicateCount
+            lastMissingTeamCount = stats.missingTeamCount
+            lastInvalidMatchCount = stats.invalidCount
 
             lastSkippedMatchCount =
                 (stats.rawCount - matches.size)
@@ -459,7 +454,7 @@ object StatPalApi {
             .ifBlank { fallbackId2 }
             .ifBlank { fallbackId3 }
             .ifBlank {
-                "$leagueName-$homeTeam-$awayTeam-$rawDate-$kickoff"
+                "$leagueName-$homeTeam-$awayTeam-$rawDate-$kickoff-$index"
             }
 
         val description =
@@ -472,10 +467,7 @@ object StatPalApi {
             Azonosító: $matchId
             """.trimIndent()
 
-        if (
-            homeTeam.isBlank() ||
-            awayTeam.isBlank()
-        ) {
+        if (homeTeam.isBlank() || awayTeam.isBlank()) {
 
             stats.missingTeamCount++
 
@@ -513,18 +505,14 @@ object StatPalApi {
             .orEmpty()
             .trim()
             .ifBlank { "-" }
-            .let {
-                if (it == "?") "-" else it
-            }
+            .let { if (it == "?") "-" else it }
 
         val awayScore = awayObject
             ?.optString("goals")
             .orEmpty()
             .trim()
             .ifBlank { "-" }
-            .let {
-                if (it == "?") "-" else it
-            }
+            .let { if (it == "?") "-" else it }
 
         val status = matchObject
             .optString("status")
@@ -537,12 +525,13 @@ object StatPalApi {
         val (localKickoff, localDate) = convertUtcKickoffToLocal(rawDate, kickoff)
 
         val matchTime = when {
-
-            status.equals("FT", true) ->
-                "FT"
-
-            status.equals("HT", true) ->
-                "HT"
+            status.equals("FT", true) -> "FT"
+            status.equals("AET", true) -> "AET"
+            status.equals("PEN", true) -> "PEN"
+            status.equals("HT", true) -> "HT"
+            status.equals("PST", true) -> "Elhalasztva"
+            status.equals("CANC", true) || status.equals("CANCELLED", true) -> "Törölve"
+            status.equals("ABD", true) || status.equals("ABANDONED", true) -> "Félbeszakadt"
 
             injuryMinute.isNotBlank() &&
                 status.isNotBlank() &&
@@ -552,15 +541,13 @@ object StatPalApi {
             injuryMinute.isNotBlank() ->
                 injuryMinute
 
-            status.equals("NS", true) ||
-                status.equals("TBD", true) ->
+            status.equals("NS", true) || status.equals("TBD", true) ->
                 localKickoff.ifBlank { "Hamarosan" }
 
             status.matches(Regex("\\d{1,2}:\\d{2}")) ->
                 convertUtcKickoffToLocal(rawDate, status).first
 
-            status.isNotBlank() &&
-                status.all { it.isDigit() } ->
+            status.isNotBlank() && status.all { it.isDigit() } ->
                 "$status'"
 
             status.isNotBlank() ->
