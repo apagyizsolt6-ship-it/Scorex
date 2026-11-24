@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.sp
 fun LiveMatchCard(
     match: ScorexMatch,
     hasSavedTip: Boolean = false,
+    hasFavoriteTeam: Boolean = false,
     onClick: () -> Unit = {}
 ) {
     val isFinished = isMatchFinished(match)
@@ -36,7 +37,11 @@ fun LiveMatchCard(
     }
 
     GlassPanel(
-        borderColor = statusColor.copy(alpha = if (isLive) 0.55f else 0.22f),
+        borderColor = when {
+            isLive -> AccentColor.copy(alpha = 0.55f)
+            hasFavoriteTeam -> GoldAccent.copy(alpha = 0.45f)
+            else -> statusColor.copy(alpha = 0.22f)
+        },
         gradientColors = if (isLive) {
             listOf(AccentColor.copy(alpha = 0.14f), GlassSurface)
         } else {
@@ -63,7 +68,7 @@ fun LiveMatchCard(
                     horizontalArrangement = Arrangement.spacedBy(5.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (hasSavedTip) {
+                    if (hasFavoriteTeam) {
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(50))
@@ -71,8 +76,24 @@ fun LiveMatchCard(
                                 .padding(horizontal = 7.dp, vertical = 2.dp)
                         ) {
                             Text(
-                                text = "TIPP",
+                                text = "♥ CSAPAT",
                                 color = GoldAccent,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    if (hasSavedTip) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(CyanAccent.copy(alpha = 0.20f))
+                                .padding(horizontal = 7.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "TIPP",
+                                color = CyanAccent,
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold
                             )
