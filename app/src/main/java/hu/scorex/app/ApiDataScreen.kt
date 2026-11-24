@@ -34,6 +34,7 @@ fun ApiDataScreen(
     val missingTeamCount = StatPalApi.lastMissingTeamCount
     val invalidMatchCount = StatPalApi.lastInvalidMatchCount
     val skippedDetails = StatPalApi.lastSkippedMatchDetails
+    val dailyRequests = StatPalApi.lastDailyRequestCount
 
     var showFullJson by remember { mutableStateOf(false) }
     val previewLimit = 8000
@@ -83,6 +84,7 @@ fun ApiDataScreen(
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(modifier = Modifier.height(8.dp))
+                DiagnosticRow(label = "Napi API-kérésszám", value = dailyRequests, valueColor = CyanAccent)
                 DiagnosticRow(label = "Bajnokságok", value = leagueCount.toString())
                 DiagnosticRow(label = "API által küldött meccsek", value = apiMatchCount.toString())
                 DiagnosticRow(label = "Feldolgozott meccsek", value = parsedMatchCount.toString(), valueColor = AccentColor)
