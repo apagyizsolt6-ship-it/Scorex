@@ -150,6 +150,7 @@ fun LeagueSection(
     savedTips: List<String> = emptyList(),
     selectedLeagueKey: String? = null,
     selectedTeamKey: String? = null,
+    forceLiveOnly: Boolean = false,
     onClearSelectedLeague: () -> Unit = {},
     onClearSelectedTeam: () -> Unit = {},
     onSelectMatch: (ScorexMatch) -> Unit = {}
@@ -220,7 +221,8 @@ fun LeagueSection(
         favoriteTeamSet,
         savedTips.toList(),
         selectedLeagueKey,
-        selectedTeamKey
+        selectedTeamKey,
+        forceLiveOnly
     ) {
         val q = searchQuery.trim().lowercase(Locale("hu", "HU"))
         matches.filter { match ->
@@ -231,6 +233,7 @@ fun LeagueSection(
             val matchesSelectedTeam = selectedTeamKey == null ||
                 favoriteTeamKey(match.homeTeam) == selectedTeamKey ||
                 favoriteTeamKey(match.awayTeam) == selectedTeamKey
+            val matchesLiveQuick = !forceLiveOnly || isMatchLive(match)
 
             val matchesFilter = when (activeFilter) {
                 LeagueFilter.ALL -> true
@@ -249,7 +252,7 @@ fun LeagueSection(
                 match.rawStatus.lowercase(Locale("hu", "HU")).contains(q) ||
                 match.date.lowercase(Locale("hu", "HU")).contains(q)
 
-            matchesSelectedLeague && matchesSelectedTeam && matchesFilter && matchesSearch
+            matchesSelectedLeague && matchesSelectedTeam && matchesLiveQuick && matchesFilter && matchesSearch
         }
     }
 
@@ -528,7 +531,8 @@ fun LeagueSection(
                         searchQuery.isNotBlank() ||
                         activeFilter != LeagueFilter.ALL ||
                         selectedLeagueKey != null ||
-                        selectedTeamKey != null
+                        selectedTeamKey != null ||
+                        forceLiveOnly
                     ) {
                         OutlinedButton(
                             onClick = {
@@ -559,52 +563,77 @@ fun LeagueSection(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable {
-                        val newState = !allExpanded
-                        sortedEntries.forEach { entry ->
-                            expandedStates[entry.key] = newState
-                        }
-                    }
-                    .padding(horizontal = 14.dp, vertical = 11.dp),
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
+                Row(
                     modifier = Modifier
-                        .size(32.dp)
-                        .clip(CircleShape)
-                        .background(LeagueGreen.copy(alpha = 0.20f)),
-                    contentAlignment = Alignment.Center
+                        .weight(1f)
+                        .clickable {
+                            val newState = !allExpanded
+                            sortedEntries.forEach { entry ->
+                                expandedStates[entry.key] = newState
+                            }
+                        },
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(text = "⚽", fontSize = 16.sp)
-                }
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(LeagueGreen.copy(alpha = 0.20f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(text = "⚽", fontSize = 16.sp)
+                    }
 
-                Spacer(Modifier.width(10.dp))
+                    Spacer(Modifier.width(10.dp))
 
-                Column(modifier = Modifier.weight(1f)) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Összes bajnokság (${sortedEntries.size})",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        Text(
+                            text = if (allExpanded) {
+                                "Minden bajnokság nyitva • ${favorites.size} kedvenc"
+                            } else {
+                                "Bajnokságok összecsukva • ${favorites.size} kedvenc"
+                            },
+                            color = LeagueText,
+                            fontSize = 10.sp
+                        )
+                    }
+
                     Text(
-                        text = "Összes bajnokság (${sortedEntries.size})",
-                        color = Color.White,
-                        fontSize = 14.sp,
+                        text = if (allExpanded) "⌃" else "⌄",
+                        color = LeagueGreen,
+                        fontSize = 24.sp,
                         fontWeight = FontWeight.Bold
                     )
-
-                    Text(
-                        text = if (allExpanded) {
-                            "Minden bajnokság nyitva • ${favorites.size} kedvenc"
-                        } else {
-                            "Bajnokságok összecsukva • ${favorites.size} kedvenc"
-                        },
-                        color = LeagueText,
-                        fontSize = 10.sp
-                    )
                 }
 
-                Text(
-                    text = if (allExpanded) "⌃" else "⌄",
-                    color = LeagueGreen,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                if (favorites.isNotEmpty()) {
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "★ CSAK KEDV.",
+                        color = LeagueGold,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(7.dp))
+                            .background(GlassDark)
+                            .clickable {
+                                sortedEntries.forEach { entry ->
+                                    expandedStates[entry.key] = entry.key in favorites
+                                }
+                            }
+                            .padding(horizontal = 7.dp, vertical = 4.dp)
+                    )
+                }
             }
         }
 
