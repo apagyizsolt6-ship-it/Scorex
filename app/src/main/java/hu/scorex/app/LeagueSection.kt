@@ -20,18 +20,18 @@ import androidx.compose.ui.unit.sp
 import java.text.Collator
 import java.util.Locale
 
-private val GlassBase = Color(0xFF132238).copy(alpha = 0.72f)
+private val GlassSurface = Color(0xFF132238).copy(alpha = 0.72f)
 private val GlassHighlight = Color(0xFF1E3454).copy(alpha = 0.52f)
 private val GlassDark = Color(0xFF0C1526).copy(alpha = 0.78f)
-private val LeagueGold = Color(0xFFFFC857)
-private val LeagueGreen = Color(0xFF35E0A1)
+private val GoldAccent = Color(0xFFFFC857)
+private val AccentColor = Color(0xFF35E0A1)
 private val LeagueCyan = Color(0xFF38BDF8)
 private val LeaguePurple = Color(0xFFA78BFA)
 private val LeagueCoral = Color(0xFFFF7A90)
 private val LeagueText = Color(0xFF9FB0C7)
 
 private val AccentPalette = listOf(
-    LeagueGreen,
+    AccentColor,
     LeagueCyan,
     LeaguePurple,
     LeagueCoral,
@@ -76,7 +76,7 @@ private fun accentColorForLeague(
     translatedName: String,
     isFavorite: Boolean
 ): Color {
-    if (isFavorite) return LeagueGold
+    if (isFavorite) return GoldAccent
     val key = translatedName.ifBlank { league }.lowercase(Locale("hu", "HU"))
     if (key.startsWith("magyarország")) return Color(0xFFFF6B6B)
     if (key.startsWith("nemzetközi") || key.startsWith("világ")) return LeaguePurple
@@ -273,8 +273,8 @@ fun LeagueSection(
 
         if (selectedLeagueKey != null) {
             LeagueGlassCard(
-                borderColor = LeagueGold.copy(alpha = 0.5f),
-                gradientColors = listOf(LeagueGold.copy(alpha = 0.16f), GlassBase)
+                borderColor = GoldAccent.copy(alpha = 0.5f),
+                gradientColors = listOf(GoldAccent.copy(alpha = 0.16f), GlassSurface)
             ) {
                 Row(
                     modifier = Modifier
@@ -285,7 +285,7 @@ fun LeagueSection(
                 ) {
                     Text(
                         text = "★ Szűrt liga: ${translateLeagueName(selectedLeagueKey)}",
-                        color = LeagueGold,
+                        color = GoldAccent,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.weight(1f)
@@ -307,8 +307,8 @@ fun LeagueSection(
 
         if (selectedTeamKey != null) {
             LeagueGlassCard(
-                borderColor = LeagueGold.copy(alpha = 0.5f),
-                gradientColors = listOf(LeagueGold.copy(alpha = 0.16f), GlassBase)
+                borderColor = GoldAccent.copy(alpha = 0.5f),
+                gradientColors = listOf(GoldAccent.copy(alpha = 0.16f), GlassSurface)
             ) {
                 Row(
                     modifier = Modifier
@@ -319,7 +319,7 @@ fun LeagueSection(
                 ) {
                     Text(
                         text = "♥ Szűrt csapat: $selectedTeamKey",
-                        color = LeagueGold,
+                        color = GoldAccent,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.weight(1f)
@@ -341,7 +341,7 @@ fun LeagueSection(
 
         LeagueGlassCard(
             borderColor = LeagueCyan.copy(alpha = 0.34f),
-            gradientColors = listOf(GlassHighlight, GlassBase)
+            gradientColors = listOf(GlassHighlight, GlassSurface)
         ) {
             Column(
                 modifier = Modifier.padding(10.dp),
@@ -392,8 +392,8 @@ fun LeagueSection(
                         val selected = activeFilter == filter
                         val chipColor = when (filter) {
                             LeagueFilter.ALL -> LeagueCyan
-                            LeagueFilter.FAVORITES -> LeagueGold
-                            LeagueFilter.LIVE -> LeagueGreen
+                            LeagueFilter.FAVORITES -> GoldAccent
+                            LeagueFilter.LIVE -> AccentColor
                             LeagueFilter.TIPS -> LeaguePurple
                             LeagueFilter.FINISHED -> LeagueCoral
                         }
@@ -433,7 +433,7 @@ fun LeagueSection(
                     ) {
                         Text(
                             text = "★ ${favorites.size} mentett kedvenc liga",
-                            color = LeagueGold,
+                            color = GoldAccent,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -498,7 +498,7 @@ fun LeagueSection(
         if (sortedEntries.isEmpty()) {
             LeagueGlassCard(
                 borderColor = LeagueCoral.copy(alpha = 0.3f),
-                gradientColors = listOf(GlassHighlight, GlassBase)
+                gradientColors = listOf(GlassHighlight, GlassSurface)
             ) {
                 Column(
                     modifier = Modifier.padding(14.dp),
@@ -540,7 +540,7 @@ fun LeagueSection(
 
         LeagueGlassCard(
             borderColor = LeagueCyan.copy(alpha = 0.35f),
-            gradientColors = listOf(Color(0xFF1F3859).copy(alpha = 0.80f), GlassBase)
+            gradientColors = listOf(Color(0xFF1F3859).copy(alpha = 0.80f), GlassSurface)
         ) {
             Row(
                 modifier = Modifier
@@ -563,7 +563,7 @@ fun LeagueSection(
                         modifier = Modifier
                             .size(32.dp)
                             .clip(CircleShape)
-                            .background(LeagueGreen.copy(alpha = 0.20f)),
+                            .background(AccentColor.copy(alpha = 0.20f)),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(text = "⚽", fontSize = 16.sp)
@@ -592,7 +592,7 @@ fun LeagueSection(
 
                     Text(
                         text = if (allExpanded) "⌃" else "⌄",
-                        color = LeagueGreen,
+                        color = AccentColor,
                         fontSize = 24.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -602,7 +602,7 @@ fun LeagueSection(
                     Spacer(Modifier.width(8.dp))
                     Text(
                         text = "★ CSAK KEDV.",
-                        color = LeagueGold,
+                        color = GoldAccent,
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier
@@ -630,9 +630,9 @@ fun LeagueSection(
             LeagueGlassCard(
                 borderColor = accent.copy(alpha = if (isFavorite) 0.65f else 0.30f),
                 gradientColors = if (isFavorite) {
-                    listOf(LeagueGold.copy(alpha = 0.18f), GlassBase)
+                    listOf(GoldAccent.copy(alpha = 0.18f), GlassSurface)
                 } else {
-                    listOf(accent.copy(alpha = 0.12f), GlassBase)
+                    listOf(accent.copy(alpha = 0.12f), GlassSurface)
                 }
             ) {
                 Row(
@@ -671,7 +671,7 @@ fun LeagueSection(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = translatedLeague,
-                            color = if (isFavorite) LeagueGold else Color.White,
+                            color = if (isFavorite) GoldAccent else Color.White,
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.sp
                         )
@@ -700,12 +700,12 @@ fun LeagueSection(
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(50))
-                                        .background(LeagueGreen.copy(alpha = 0.22f))
+                                        .background(AccentColor.copy(alpha = 0.22f))
                                         .padding(horizontal = 7.dp, vertical = 1.dp)
                                 ) {
                                     Text(
                                         text = "$liveCount ÉLŐ",
-                                        color = LeagueGreen,
+                                        color = AccentColor,
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.Bold
                                     )
@@ -716,12 +716,12 @@ fun LeagueSection(
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(50))
-                                        .background(LeagueGold.copy(alpha = 0.22f))
+                                        .background(GoldAccent.copy(alpha = 0.22f))
                                         .padding(horizontal = 7.dp, vertical = 1.dp)
                                 ) {
                                     Text(
                                         text = "KEDVENC",
-                                        color = LeagueGold,
+                                        color = GoldAccent,
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.Bold
                                     )
@@ -732,7 +732,7 @@ fun LeagueSection(
 
                     Text(
                         text = if (isFavorite) "★" else "☆",
-                        color = LeagueGold,
+                        color = GoldAccent,
                         fontSize = 20.sp,
                         modifier = Modifier
                             .clip(CircleShape)

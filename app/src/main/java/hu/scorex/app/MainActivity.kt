@@ -25,18 +25,21 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.text.Normalizer
 
-internal val BackgroundColor = Color(0xFF060B14)
-internal val SurfaceColor = Color(0xFF0E1726)
-internal val GlassTop = Color(0xFF17243A)
-internal val GlassSurface = Color(0xFF101B2D)
-internal val GlassWell = Color(0xFF0A1220)
-internal val AccentColor = Color(0xFF00E676)
-internal val CyanAccent = Color(0xFF29B6F6)
-internal val GoldAccent = Color(0xFFFFD54F)
-internal val PurpleAccent = Color(0xFFB388FF)
-internal val SecondaryColor = Color(0xFF9FB0C7)
+// Flashscore-inspired dark sports theme
+internal val BackgroundColor = Color(0xFF0B0E14)
+internal val SurfaceColor = Color(0xFF12161E)
+internal val GlassTop = Color(0xFF1A1F2A)
+internal val GlassSurface = Color(0xFF151922)
+internal val GlassWell = Color(0xFF0E1218)
+internal val AccentColor = Color(0xFFFF6B00)          // Live / primary orange
+internal val CyanAccent = Color(0xFF4FC3F7)
+internal val GoldAccent = Color(0xFFFFC107)
+internal val PurpleAccent = Color(0xFFAB47BC)
+internal val SecondaryColor = Color(0xFF8A93A6)
 internal val ErrorColor = Color(0xFFFF5252)
 internal val WarningColor = Color(0xFFFFB74D)
+internal val LiveGreen = Color(0xFF00E676)
+internal val ScoreWhite = Color(0xFFFFFFFF)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

@@ -339,25 +339,23 @@ internal fun HomeScreen(
                         Text(
                             text = "SCORE",
                             color = Color.White,
-                            fontSize = 26.sp,
-                            fontWeight = FontWeight.Black
+                            fontSize = 28.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 0.5.sp
                         )
                         Text(
                             text = "X",
                             color = AccentColor,
-                            fontSize = 26.sp,
-                            fontWeight = FontWeight.Black
+                            fontSize = 28.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 0.5.sp
                         )
                     }
                     Text(
-                        text = if (dailyUsageText != "-") {
-                            "ÉLD ÁT A FUTBALLT • NAPI HÍVÁS: $dailyUsageText"
-                        } else {
-                            "ÉLD ÁT A FUTBALLT"
-                        },
-                        color = CyanAccent,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold
+                        text = "ÉLŐ EREDMÉNYEK  •  FLASHSTYLE",
+                        color = SecondaryColor,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium
                     )
                 }
 

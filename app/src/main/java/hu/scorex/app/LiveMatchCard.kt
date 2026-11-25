@@ -11,6 +11,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -24,139 +26,114 @@ fun LiveMatchCard(
     val isFinished = isMatchFinished(match)
     val isLive = isMatchLive(match)
 
+    val statusText = when {
+        isLive -> match.matchTime.ifBlank { "ÉLŐ" }
+        isFinished -> "FT"
+        else -> match.matchTime.ifBlank { match.date.takeLast(5) }
+    }
+
     val statusColor = when {
         isLive -> AccentColor
         isFinished -> SecondaryColor
         else -> CyanAccent
     }
 
-    val scoreColor = when {
-        isLive -> GoldAccent
-        isFinished -> Color.White
-        else -> AccentColor
-    }
+    val scoreColor = if (isLive || isFinished) ScoreWhite else SecondaryColor
 
-    GlassPanel(
-        borderColor = when {
-            isLive -> AccentColor.copy(alpha = 0.55f)
-            hasFavoriteTeam -> GoldAccent.copy(alpha = 0.45f)
-            else -> statusColor.copy(alpha = 0.22f)
-        },
-        gradientColors = if (isLive) {
-            listOf(AccentColor.copy(alpha = 0.14f), GlassSurface)
-        } else {
-            listOf(GlassTop, GlassSurface)
-        },
-        modifier = Modifier.clickable { onClick() }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(GlassSurface)
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(modifier = Modifier.padding(11.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+        // Status / Time
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.width(48.dp)
+        ) {
+            if (isLive) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(AccentColor)
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = statusText,
+                        color = Color.White,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                }
+            } else {
                 Text(
-                    text = translateLeagueName(match.league),
-                    color = SecondaryColor,
-                    fontSize = 10.sp,
+                    text = statusText,
+                    color = statusColor,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            if (hasFavoriteTeam) {
+                Text("♥", color = GoldAccent, fontSize = 10.sp)
+            }
+        }
+
+        Spacer(Modifier.width(10.dp))
+
+        // Teams + Score
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = match.homeTeam,
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
-
-                Spacer(modifier = Modifier.width(6.dp))
-
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (hasFavoriteTeam) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(50))
-                                .background(GoldAccent.copy(alpha = 0.20f))
-                                .padding(horizontal = 7.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = "♥ CSAPAT",
-                                color = GoldAccent,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    if (hasSavedTip) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(50))
-                                .background(CyanAccent.copy(alpha = 0.20f))
-                                .padding(horizontal = 7.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = "TIPP",
-                                color = CyanAccent,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(statusColor.copy(alpha = 0.18f))
-                            .padding(horizontal = 8.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = if (isLive && !match.matchTime.contains("ÉLŐ", true)) {
-                                "● ${match.matchTime}"
-                            } else {
-                                match.matchTime
-                            },
-                            color = statusColor,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
+                Text(
+                    text = match.homeScore.ifBlank { "-" },
+                    color = scoreColor,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Black,
+                    modifier = Modifier.padding(start = 8.dp)
+                )
             }
+            Spacer(Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = match.awayTeam,
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = match.awayScore.ifBlank { "-" },
+                    color = scoreColor,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Black,
+                    modifier = Modifier.padding(start = 8.dp)
+                )
+            }
+        }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
+        // Tip indicator
+        if (hasSavedTip) {
+            Spacer(Modifier.width(6.dp))
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(CyanAccent.copy(alpha = 0.18f))
+                    .padding(horizontal = 6.dp, vertical = 3.dp)
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = match.homeTeam,
-                        color = Color.White,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(5.dp))
-                    Text(
-                        text = match.awayTeam,
-                        color = Color.White,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        text = match.homeScore,
-                        color = scoreColor,
-                        fontSize = 19.sp,
-                        fontWeight = FontWeight.Black
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = match.awayScore,
-                        color = scoreColor,
-                        fontSize = 19.sp,
-                        fontWeight = FontWeight.Black
-                    )
-                }
+                Text("TIPP", color = CyanAccent, fontSize = 9.sp, fontWeight = FontWeight.Bold)
             }
         }
     }
