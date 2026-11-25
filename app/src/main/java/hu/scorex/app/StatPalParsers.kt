@@ -322,51 +322,60 @@ object StatPalParsers {
     }
 
     fun parsePrediction(rawJson: String): MatchPredictionInfo? {
-        val root = runCatching { JSONTokener(rawJson).nextValue() }.getOrNull() ?: return null
-        val objs = mutableListOf<JSONObject>()
-        extractObjects(
-            root,
-            { it.has("advice") || it.has("winner") || it.has("home") || it.has("probabilities") },
-            objs
-        )
-        val p = objs.firstOrNull() ?: return null
-        val probs = p.optJSONObject("probabilities") ?: p
-        val homeP = probs.optString("home").ifBlank { "-" }
-        val drawP = probs.optString("draw").ifBlank { "-" }
-        val awayP = probs.optString("away").ifBlank { "-" }
-        val advice = p.optString("advice").ifBlank { p.optString("prediction") }.ifBlank { "Nincs szöveges javaslat" }
-        val fav = p.optString("winner").ifBlank {
-            when {
-                homeP.removeSuffix("%").toFloatOrNull() ?: 0f > (awayP.removeSuffix("%").toFloatOrNull() ?: 0f) -> "Hazai esélyesebb"
-                awayP.removeSuffix("%").toFloatOrNull() ?: 0f > (homeP.removeSuffix("%").toFloatOrNull() ?: 0f) -> "Vendég esélyesebb"
-                else -> "Kiegyenlített"
-            }
-        }
+        val root = runCatching { JSONTokener(rawJson).nextValue() }.getOrNull() as? JSONObject ?: return null
+        val pred = root.optJSONObject("prediction") ?: return null
+        val choice = pred.optString("choice").ifBlank { pred.optString("winner") }.ifBlank { "-" }
+        val reasoning = pred.optString("reasoning").ifBlank { pred.optString("advice") }.ifBlank { "Nincs részletes indoklás" }
+        val odds = pred.optJSONObject("prematch_odds")
+        val homeP = odds?.optString("home").orEmpty().ifBlank { "-" }
+        val drawP = odds?.optString("draw").orEmpty().ifBlank { "-" }
+        val awayP = odds?.optString("away").orEmpty().ifBlank { "-" }
         return MatchPredictionInfo(
-            favoriteSide = fav,
+            favoriteSide = choice,
             homeWinProb = homeP,
             drawProb = drawP,
             awayWinProb = awayP,
-            advice = advice
+            advice = reasoning
         )
     }
 
     fun parseH2H(rawJson: String): List<String> {
-        val root = runCatching { JSONTokener(rawJson).nextValue() }.getOrNull() ?: return emptyList()
-        val matchObjs = mutableListOf<JSONObject>()
-        extractObjects(root, { it.has("home") && it.has("away") }, matchObjs)
-        return matchObjs.mapNotNull { m ->
-            val h = m.optJSONObject("home")
-            val a = m.optJSONObject("away")
-            val hName = h?.optString("name").orEmpty().trim()
-            val aName = a?.optString("name").orEmpty().trim()
-            val hGoals = h?.optString("goals").orEmpty().ifBlank { "-" }
-            val aGoals = a?.optString("goals").orEmpty().ifBlank { "-" }
-            val date = m.optString("date").trim()
-            if (hName.isBlank() || aName.isBlank()) null
-            else if (date.isNotBlank()) "$date • $hName $hGoals : $aGoals $aName"
-            else "$hName $hGoals : $aGoals $aName"
-        }.distinct().take(10)
+        val root = runCatching { JSONTokener(rawJson).nextValue() }.getOrNull() as? JSONObject ?: return emptyList()
+        val h2h = root.optJSONObject("head-to-head") ?: root
+        val recent = h2h.optJSONObject("recent_meetings")?.optJSONArray("match")
+            ?: h2h.optJSONArray("match")
+        val results = mutableListOf<String>()
+        if (recent != null) {
+            for (i in 0 until minOf(recent.length(), 8)) {
+                val m = recent.optJSONObject(i) ?: continue
+                val date = m.optString("date").trim()
+                val t1 = m.optString("team1_name").ifBlank { m.optJSONObject("home")?.optString("name").orEmpty() }
+                val t2 = m.optString("team2_name").ifBlank { m.optJSONObject("away")?.optString("name").orEmpty() }
+                val s1 = m.optString("team1_score").ifBlank { m.optJSONObject("home")?.optString("goals").orEmpty() }.ifBlank { "-" }
+                val s2 = m.optString("team2_score").ifBlank { m.optJSONObject("away")?.optString("goals").orEmpty() }.ifBlank { "-" }
+                if (t1.isNotBlank() && t2.isNotBlank()) {
+                    results.add(if (date.isNotBlank()) "$date • $t1 $s1 : $s2 $t2" else "$t1 $s1 : $s2 $t2")
+                }
+            }
+        }
+        // Fallback to old style
+        if (results.isEmpty()) {
+            val matchObjs = mutableListOf<JSONObject>()
+            extractObjects(root, { it.has("home") && it.has("away") }, matchObjs)
+            matchObjs.take(8).forEach { m ->
+                val h = m.optJSONObject("home")
+                val a = m.optJSONObject("away")
+                val hName = h?.optString("name").orEmpty().trim()
+                val aName = a?.optString("name").orEmpty().trim()
+                val hGoals = h?.optString("goals").orEmpty().ifBlank { "-" }
+                val aGoals = a?.optString("goals").orEmpty().ifBlank { "-" }
+                val date = m.optString("date").trim()
+                if (hName.isNotBlank() && aName.isNotBlank()) {
+                    results.add(if (date.isNotBlank()) "$date • $hName $hGoals : $aGoals $aName" else "$hName $hGoals : $aGoals $aName")
+                }
+            }
+        }
+        return results.distinct().take(10)
     }
 
     fun parseLineups(rawJson: String): MatchLineupsInfo? {

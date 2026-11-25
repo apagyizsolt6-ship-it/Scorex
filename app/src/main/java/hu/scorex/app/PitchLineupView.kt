@@ -31,7 +31,7 @@ fun PitchLineupView(
 ) {
     val accent = if (isHome) GoldAccent else CyanAccent
     val bgBrush = Brush.verticalGradient(
-        colors = listOf(Color(0xFF1A5C2E), Color(0xFF0F3D1F), Color(0xFF1A5C2E))
+        colors = listOf(Color(0xFF2E8B4A), Color(0xFF1A5C2E), Color(0xFF0F3D1F), Color(0xFF1A5C2E))
     )
 
     Column(modifier = modifier) {
@@ -59,7 +59,9 @@ fun PitchLineupView(
                 val stroke = 1.6f
                 drawRect(Color.White.copy(alpha = 0.28f), size = size, style = Stroke(stroke))
                 drawLine(Color.White.copy(alpha = 0.22f), Offset(sw / 2, 0f), Offset(sw / 2, sh), strokeWidth = stroke)
-                drawCircle(Color.White.copy(alpha = 0.22f), radius = min(sw, sh) * 0.13f, center = Offset(sw / 2, sh / 2), style = Stroke(stroke))
+                drawCircle(Color.White.copy(alpha = 0.25f), radius = min(sw, sh) * 0.13f, center = Offset(sw / 2, sh / 2), style = Stroke(stroke))
+                // Center spot
+                drawCircle(Color.White.copy(alpha = 0.4f), radius = 3f, center = Offset(sw / 2, sh / 2))
                 val penW = sw * 0.52f
                 val penH = sh * 0.16f
                 drawRect(Color.White.copy(alpha = 0.2f), topLeft = Offset((sw - penW) / 2, 0f), size = Size(penW, penH), style = Stroke(stroke))
@@ -91,9 +93,13 @@ private fun PlayerMarker(player: LineupPlayerItem, accent: Color, modifier: Modi
     ) {
         Box(
             modifier = Modifier
-                .size(30.dp)
+                .size(32.dp)
                 .clip(CircleShape)
-                .background(accent),
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(accent, accent.copy(alpha = 0.7f))
+                    )
+                ),
             contentAlignment = Alignment.Center
         ) {
             Text(

@@ -62,15 +62,43 @@ fun MatchDetailScreen(
         if (apiKey.isBlank()) return@LaunchedEffect
         when (activeTab) {
             MatchDetailTab.H2H_PRED -> {
-                if (prediction == null && h2hList.isEmpty()) {
-                    isLoadingTab = true
-                    withContext(Dispatchers.IO) {
-                        prediction = runCatching { StatPalApi.fetchMatchPrediction(apiKey, match.id) }.getOrNull()
-                        h2hList = runCatching { StatPalApi.fetchMatchH2H(apiKey, match) }.getOrDefault(emptyList())
+                GlassPanel(
+                    borderColor = PurpleAccent.copy(alpha = 0.30f),
+                    gradientColors = listOf(GlassSurface, GlassWell)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("ELŐREJELZÉS & ESÉLYEK", color = PurpleAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        val pred = prediction
+                        if (pred == null) {
+                            Text("Ehhez a mérkőzéshez jelenleg nincs előrejelzési adat.", color = SecondaryColor, fontSize = 12.sp)
+                        } else {
+                            Text(pred.favoriteSide, color = GoldAccent, fontSize = 14.sp, fontWeight = FontWeight.Black)
+                            Text(pred.advice, color = Color.White, fontSize = 12.sp)
+                            if (pred.homeWinProb != "-" || pred.drawProb != "-" || pred.awayWinProb != "-") {
+                                Spacer(Modifier.height(4.dp))
+                                Text("Prematch odds: 1: ${pred.homeWinProb}  |  X: ${pred.drawProb}  |  2: ${pred.awayWinProb}", color = CyanAccent, fontSize = 11.sp)
+                            }
+                        }
                     }
-                    isLoadingTab = false
+                }
+
+                GlassPanel(
+                    borderColor = CyanAccent.copy(alpha = 0.30f),
+                    gradientColors = listOf(GlassSurface, GlassWell)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("EGMÁS ELLENI (H2H)", color = CyanAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        if (h2hList.isEmpty()) {
+                            Text("Nincs elérhető H2H előzmény ehhez a párosításhoz.", color = SecondaryColor, fontSize = 12.sp)
+                        } else {
+                            h2hList.forEach { row ->
+                                Text("• $row", color = Color.White, fontSize = 12.sp)
+                            }
+                        }
+                    }
                 }
             }
+
             MatchDetailTab.LINEUPS -> {
                 if (lineups == null && injuries.isEmpty()) {
                     isLoadingTab = true
