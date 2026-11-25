@@ -20,15 +20,13 @@ import androidx.compose.ui.unit.sp
 import java.text.Collator
 import java.util.Locale
 
-private val GlassSurface = Color(0xFF132238).copy(alpha = 0.72f)
-private val GlassHighlight = Color(0xFF1E3454).copy(alpha = 0.52f)
-private val GlassDark = Color(0xFF0C1526).copy(alpha = 0.78f)
-private val GoldAccent = Color(0xFFFFC857)
-private val AccentColor = Color(0xFF35E0A1)
+// Colors are defined in MainActivity.kt (package-level)
 private val LeagueCyan = Color(0xFF38BDF8)
 private val LeaguePurple = Color(0xFFA78BFA)
 private val LeagueCoral = Color(0xFFFF7A90)
 private val LeagueText = Color(0xFF9FB0C7)
+private val GlassHighlight = Color(0xFF1E3454).copy(alpha = 0.52f)
+private val GlassDark = Color(0xFF0C1526).copy(alpha = 0.78f)
 
 private val AccentPalette = listOf(
     AccentColor,
